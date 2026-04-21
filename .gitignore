@@ -107,3 +107,9 @@ temp_script.jsx
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Playwright CLI cache
+.playwright-cli/
+
+# Ad-hoc screenshots
+hn-submit.png
