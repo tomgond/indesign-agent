@@ -19,9 +19,15 @@ function serializeResult(value) {
 
 async function handleExecute(ws, msg) {
   try {
-    // new Function injects `app` so code can access the InDesign DOM directly
-    const fn = new Function('app', `return (async () => { ${msg.code} })()`);
-    const result = await fn(app);
+    // Pass `require` so code inside new Function() can call require('indesign') etc.
+    // new Function() runs in global scope and loses UXP's module-scoped require.
+    const fn = new Function('app', 'require', `return (async () => { ${msg.code} })()`);
+    const result = await Promise.race([
+      fn(app, require),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Execution timed out in plugin (25s)')), 25000)
+      ),
+    ]);
     ws.send(JSON.stringify({ type: 'result', id: msg.id, result: serializeResult(result) }));
   } catch (e) {
     ws.send(JSON.stringify({ type: 'error', id: msg.id, error: e.message || String(e) }));
