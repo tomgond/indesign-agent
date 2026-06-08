@@ -17,7 +17,7 @@ function serializeResult(value) {
   return String(value);
 }
 
-// Whitelist: only indesign/* and uxp modules are allowed inside execute calls.
+// Whitelist: only 'indesign' and 'uxp' modules are allowed inside execute calls.
 // Passing raw require into new Function() would otherwise expose the full module system.
 const ALLOWED_MODULES = new Set(['indesign', 'uxp']);
 function sandboxedRequire(moduleName) {
