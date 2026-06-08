@@ -17,19 +17,31 @@ function serializeResult(value) {
   return String(value);
 }
 
+// Whitelist: only indesign/* and uxp modules are allowed inside execute calls.
+// Passing raw require into new Function() would otherwise expose the full module system.
+const ALLOWED_MODULES = new Set(['indesign', 'uxp']);
+function sandboxedRequire(moduleName) {
+  if (!ALLOWED_MODULES.has(moduleName)) {
+    throw new Error(`require('${moduleName}') is not allowed inside execute calls`);
+  }
+  return require(moduleName);
+}
+
 async function handleExecute(ws, msg) {
+  let timerId;
   try {
-    // Pass `require` so code inside new Function() can call require('indesign') etc.
+    // Pass sandboxedRequire so code inside new Function() can call require('indesign') etc.
     // new Function() runs in global scope and loses UXP's module-scoped require.
     const fn = new Function('app', 'require', `return (async () => { ${msg.code} })()`);
     const result = await Promise.race([
-      fn(app, require),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Execution timed out in plugin (25s)')), 25000)
-      ),
+      fn(app, sandboxedRequire).finally(() => clearTimeout(timerId)),
+      new Promise((_, reject) => {
+        timerId = setTimeout(() => reject(new Error('Execution timed out in plugin (25s)')), 25000);
+      }),
     ]);
     ws.send(JSON.stringify({ type: 'result', id: msg.id, result: serializeResult(result) }));
   } catch (e) {
+    clearTimeout(timerId);
     ws.send(JSON.stringify({ type: 'error', id: msg.id, error: e.message || String(e) }));
   }
 }
