@@ -468,6 +468,9 @@ export class PageHandlers {
         const { pageIndex } = args;
 
         const code = `
+            function collectionLength(collection) {
+                try { return collection ? collection.length : 0; } catch(e) { return 0; }
+            }
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
@@ -475,12 +478,12 @@ export class PageHandlers {
             return {
                 success: true,
                 pageName: page.name,
-                textFrames: page.textFrames.length,
-                rectangles: page.rectangles.length,
-                ellipses: page.ovals.length,
-                graphics: page.graphics.length,
-                groups: page.groups.length,
-                totalItems: page.allPageItems.length
+                textFrames: collectionLength(page.textFrames),
+                rectangles: collectionLength(page.rectangles),
+                ellipses: collectionLength(page.ovals),
+                graphics: collectionLength(page.graphics),
+                groups: collectionLength(page.groups),
+                totalItems: collectionLength(page.allPageItems)
             };
         `;
 
@@ -488,6 +491,75 @@ export class PageHandlers {
         return result?.success
             ? formatResponse(result, "Get Page Content Summary")
             : formatErrorResponse(result?.error || 'Failed to get page content summary', "Get Page Content Summary");
+    }
+
+    static async listSpreads() {
+        const code = `
+            if (app.documents.length === 0) return { success: false, error: 'No document open' };
+            const doc = app.activeDocument;
+            const spreads = [];
+            for (let i = 0; i < doc.spreads.length; i++) {
+                const spread = doc.spreads.item(i);
+                const pageNames = [];
+                for (let p = 0; p < spread.pages.length; p++) pageNames.push(spread.pages.item(p).name);
+                spreads.push({
+                    index: i,
+                    name: spread.name || '',
+                    id: spread.id,
+                    pages: spread.pages.length,
+                    pageNames
+                });
+            }
+            return { success: true, count: spreads.length, spreads };
+        `;
+        const result = await ScriptExecutor.executeViaUXP(code);
+        return result?.success
+            ? formatResponse(result, "List Spreads")
+            : formatErrorResponse(result?.error || 'Failed to list spreads', "List Spreads");
+    }
+
+    static async getSpreadInfo(args) {
+        const { spreadIndex } = args;
+        const code = `
+            if (app.documents.length === 0) return { success: false, error: 'No document open' };
+            const doc = app.activeDocument;
+            if (${spreadIndex} < 0 || ${spreadIndex} >= doc.spreads.length) return { success: false, error: 'Spread index out of range' };
+            const spread = doc.spreads.item(${spreadIndex});
+            const pages = [];
+            for (let i = 0; i < spread.pages.length; i++) {
+                const page = spread.pages.item(i);
+                pages.push({ index: page.documentOffset, name: page.name, bounds: page.bounds });
+            }
+            return { success: true, index: ${spreadIndex}, name: spread.name || '', id: spread.id, pages, pageCount: pages.length };
+        `;
+        const result = await ScriptExecutor.executeViaUXP(code);
+        return result?.success
+            ? formatResponse(result, "Get Spread Info")
+            : formatErrorResponse(result?.error || 'Failed to get spread info', "Get Spread Info");
+    }
+
+    static async getSpreadContentSummary(args) {
+        const { spreadIndex } = args;
+        const code = `
+            function collectionLength(collection) { try { return collection ? collection.length : 0; } catch(e) { return 0; } }
+            if (app.documents.length === 0) return { success: false, error: 'No document open' };
+            const doc = app.activeDocument;
+            if (${spreadIndex} < 0 || ${spreadIndex} >= doc.spreads.length) return { success: false, error: 'Spread index out of range' };
+            const spread = doc.spreads.item(${spreadIndex});
+            const pages = [];
+            let totalItems = 0;
+            for (let i = 0; i < spread.pages.length; i++) {
+                const page = spread.pages.item(i);
+                const items = collectionLength(page.allPageItems);
+                totalItems += items;
+                pages.push({ pageIndex: page.documentOffset, name: page.name, totalItems: items });
+            }
+            return { success: true, spreadIndex: ${spreadIndex}, pageCount: pages.length, totalItems, pages };
+        `;
+        const result = await ScriptExecutor.executeViaUXP(code);
+        return result?.success
+            ? formatResponse(result, "Get Spread Content Summary")
+            : formatErrorResponse(result?.error || 'Failed to get spread content summary', "Get Spread Content Summary");
     }
 
     /**

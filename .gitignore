@@ -102,6 +102,7 @@ temp_script.jsx
 *.tmp
 *.temp
 .cache/
+.codex/
 .agent/
 *.pcap
 

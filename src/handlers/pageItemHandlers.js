@@ -5,6 +5,14 @@ import { ScriptExecutor } from '../core/scriptExecutor.js';
 import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
 
 export class PageItemHandlers {
+    static collectionHelper = `
+            function collectionItem(collection, index) {
+                if (!collection) return null;
+                if (typeof collection.item === 'function') return collection.item(index);
+                return collection[index];
+            }
+        `;
+
     /**
      * Get information about a page item
      */
@@ -12,12 +20,13 @@ export class PageItemHandlers {
         const { pageIndex, itemIndex } = args;
 
         const code = `
+            ${PageItemHandlers.collectionHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             if (${itemIndex} < 0 || ${itemIndex} >= page.allPageItems.length) return { success: false, error: 'Page item index out of range' };
-            const item = page.allPageItems.item(${itemIndex});
+            const item = collectionItem(page.allPageItems, ${itemIndex});
             let type = 'Unknown';
             try { type = item.constructor?.name || 'Unknown'; } catch(e) {}
             let fillColorName = 'None';
@@ -59,13 +68,14 @@ export class PageItemHandlers {
         const uxpSelection = selectionMap[existingSelection] || 'replaceWith';
 
         const code = `
+            ${PageItemHandlers.collectionHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             if (${itemIndex} < 0 || ${itemIndex} >= page.allPageItems.length) return { success: false, error: 'Page item index out of range' };
             const { SelectionOptions } = require('indesign');
-            const item = page.allPageItems.item(${itemIndex});
+            const item = collectionItem(page.allPageItems, ${itemIndex});
             item.select(SelectionOptions[${JSON.stringify(uxpSelection)}]);
             return { success: true, id: item.id };
         `;
@@ -83,12 +93,13 @@ export class PageItemHandlers {
         const { pageIndex, itemIndex, x, y } = args;
 
         const code = `
+            ${PageItemHandlers.collectionHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             if (${itemIndex} < 0 || ${itemIndex} >= page.allPageItems.length) return { success: false, error: 'Page item index out of range' };
-            const item = page.allPageItems.item(${itemIndex});
+            const item = collectionItem(page.allPageItems, ${itemIndex});
             item.move([${x}, ${y}]);
             return { success: true, id: item.id, geometricBounds: item.geometricBounds };
         `;
@@ -119,13 +130,14 @@ export class PageItemHandlers {
         const uxpAnchor = anchorMap[anchorPoint] || 'centerAnchor';
 
         const code = `
+            ${PageItemHandlers.collectionHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             if (${itemIndex} < 0 || ${itemIndex} >= page.allPageItems.length) return { success: false, error: 'Page item index out of range' };
             const { CoordinateSpaces, AnchorPoint, ResizeMethods } = require('indesign');
-            const item = page.allPageItems.item(${itemIndex});
+            const item = collectionItem(page.allPageItems, ${itemIndex});
             item.resize(CoordinateSpaces.pasteboardCoordinates, AnchorPoint.${uxpAnchor}, ResizeMethods.replacingCurrentDimensionsWith, [${width}, ${height}]);
             return { success: true, id: item.id, geometricBounds: item.geometricBounds };
         `;
@@ -143,12 +155,13 @@ export class PageItemHandlers {
         const { pageIndex, itemIndex, fillColor, strokeColor, strokeWeight, visible, locked } = args;
 
         const code = `
+            ${PageItemHandlers.collectionHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             if (${itemIndex} < 0 || ${itemIndex} >= page.allPageItems.length) return { success: false, error: 'Page item index out of range' };
-            const item = page.allPageItems.item(${itemIndex});
+            const item = collectionItem(page.allPageItems, ${itemIndex});
             if (${JSON.stringify(fillColor)} !== null && ${JSON.stringify(fillColor)} !== undefined) {
                 try { item.fillColor = doc.colors.itemByName(${JSON.stringify(fillColor)}); } catch(e) {}
             }
@@ -180,12 +193,13 @@ export class PageItemHandlers {
         const { pageIndex, itemIndex, x, y } = args;
 
         const code = `
+            ${PageItemHandlers.collectionHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             if (${itemIndex} < 0 || ${itemIndex} >= page.allPageItems.length) return { success: false, error: 'Page item index out of range' };
-            const item = page.allPageItems.item(${itemIndex});
+            const item = collectionItem(page.allPageItems, ${itemIndex});
             const newItem = item.duplicate();
             newItem.move([${x}, ${y}]);
             return { success: true, id: newItem.id, geometricBounds: newItem.geometricBounds };
@@ -204,12 +218,13 @@ export class PageItemHandlers {
         const { pageIndex, itemIndex } = args;
 
         const code = `
+            ${PageItemHandlers.collectionHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             if (${itemIndex} < 0 || ${itemIndex} >= page.allPageItems.length) return { success: false, error: 'Page item index out of range' };
-            const item = page.allPageItems.item(${itemIndex});
+            const item = collectionItem(page.allPageItems, ${itemIndex});
             const id = item.id;
             item.remove();
             return { success: true, deletedId: id };
@@ -228,13 +243,14 @@ export class PageItemHandlers {
         const { pageIndex } = args;
 
         const code = `
+            ${PageItemHandlers.collectionHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             const items = [];
             for (let i = 0; i < page.allPageItems.length; i++) {
-                const item = page.allPageItems.item(i);
+                const item = collectionItem(page.allPageItems, i);
                 let type = 'Unknown';
                 try { type = item.constructor?.name || 'Unknown'; } catch(e) {}
                 items.push({

@@ -259,9 +259,11 @@ export class DocumentHandlers {
         `;
 
         const result = await ScriptExecutor.executeViaUXP(code);
-        return result?.success
-            ? formatResponse(result, "Close Document")
-            : formatErrorResponse(result?.error || 'Failed to close document', "Close Document");
+        if (result?.success) {
+            sessionManager.clearSession();
+            return formatResponse(result, "Close Document");
+        }
+        return formatErrorResponse(result?.error || 'Failed to close document', "Close Document");
     }
 
     // =================== DOCUMENT ADVANCED TOOLS ===================
@@ -277,8 +279,15 @@ export class DocumentHandlers {
                 return { success: false, error: 'No document open' };
             }
             const doc = app.activeDocument;
-            await doc.preflight(${JSON.stringify(profile)}, ${includeWarnings});
-            return { success: true, message: 'Document preflighted successfully' };
+            try {
+                if (typeof doc.preflight === 'function') {
+                    await doc.preflight(${JSON.stringify(profile)}, ${includeWarnings});
+                    return { success: true, message: 'Document preflighted successfully' };
+                }
+                return { success: false, error: 'Preflight is not available through this InDesign UXP API' };
+            } catch (e) {
+                return { success: false, error: 'Preflight failed: ' + e.message };
+            }
         `;
 
         const result = await ScriptExecutor.executeViaUXP(code);
@@ -771,6 +780,49 @@ export class DocumentHandlers {
         return result?.success
             ? formatResponse(result, "Get Document Layers")
             : formatErrorResponse(result?.error || 'Failed to get document layers', "Get Document Layers");
+    }
+
+    static async createLayer(args) {
+        const { name, visible = true, locked = false, color = 'BLUE' } = args;
+        const code = `
+            if (app.documents.length === 0) return { success: false, error: 'No document open' };
+            const doc = app.activeDocument;
+            let layer;
+            try {
+                layer = doc.layers.itemByName(${JSON.stringify(name)});
+                if (!layer || layer.isValid === false) {
+                    layer = doc.layers.add();
+                    layer.name = ${JSON.stringify(name)};
+                }
+            } catch(e) {
+                layer = doc.layers.add();
+                layer.name = ${JSON.stringify(name)};
+            }
+            layer.visible = ${visible};
+            layer.locked = ${locked};
+            try { layer.layerColor = ${JSON.stringify(color)}; } catch(e) {}
+            return { success: true, name: layer.name, visible: layer.visible, locked: layer.locked };
+        `;
+        const result = await ScriptExecutor.executeViaUXP(code);
+        return result?.success
+            ? formatResponse(result, "Create Layer")
+            : formatErrorResponse(result?.error || 'Failed to create layer', "Create Layer");
+    }
+
+    static async setActiveLayer(args) {
+        const { layerName } = args;
+        const code = `
+            if (app.documents.length === 0) return { success: false, error: 'No document open' };
+            const doc = app.activeDocument;
+            const layer = doc.layers.itemByName(${JSON.stringify(layerName)});
+            if (!layer || layer.isValid === false) return { success: false, error: 'Layer not found: ' + ${JSON.stringify(layerName)} };
+            doc.activeLayer = layer;
+            return { success: true, name: layer.name };
+        `;
+        const result = await ScriptExecutor.executeViaUXP(code);
+        return result?.success
+            ? formatResponse(result, "Set Active Layer")
+            : formatErrorResponse(result?.error || 'Failed to set active layer', "Set Active Layer");
     }
 
     /**

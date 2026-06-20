@@ -108,6 +108,9 @@ export class InDesignMCPServer {
             // Document Layers & Organization
             case 'get_document_layers': return await DocumentHandlers.getDocumentLayers(args);
             case 'organize_document_layers': return await DocumentHandlers.organizeDocumentLayers(args);
+            case 'create_layer': return await DocumentHandlers.createLayer(args);
+            case 'set_active_layer': return await DocumentHandlers.setActiveLayer(args);
+            case 'list_layers': return await DocumentHandlers.getDocumentLayers({ includeHidden: true, includeLocked: true });
 
             // Document Hyperlinks & Interactivity
             case 'get_document_hyperlinks': return await DocumentHandlers.getDocumentHyperlinks(args);
@@ -157,6 +160,9 @@ export class InDesignMCPServer {
             case 'reframe_page': return await PageHandlers.reframePage(args);
             case 'select_page': return await PageHandlers.selectPage(args);
             case 'get_page_content_summary': return await PageHandlers.getPageContentSummary(args);
+            case 'list_spreads': return await PageHandlers.listSpreads(args);
+            case 'get_spread_info': return await PageHandlers.getSpreadInfo(args);
+            case 'get_spread_content_summary': return await PageHandlers.getSpreadContentSummary(args);
 
             // Text Management
             case 'create_text_frame': return await TextHandlers.createTextFrame(args);
