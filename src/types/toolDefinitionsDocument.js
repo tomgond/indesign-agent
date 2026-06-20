@@ -45,13 +45,12 @@ export const documentToolDefinitions = [
     },
     {
         name: 'save_document',
-        description: 'Save the active document',
+        description: 'Save the active document. When a template workspace is active, this routes to save_working_copy and rejects custom save paths.',
         inputSchema: {
             type: 'object',
             properties: {
-                filePath: { type: 'string', description: 'Path where to save the document' },
+                filePath: { type: 'string', description: 'Path where to save the document. Not allowed while a template workspace is active.' },
             },
-            required: ['filePath'],
         },
     },
     {
@@ -282,7 +281,7 @@ export const documentToolDefinitions = [
     },
     {
         name: 'export_document_xml',
-        description: 'Export document as XML',
+        description: 'Export document as XML. When a template workspace is active, filePath must be inside workspaceRoot/exports.',
         inputSchema: {
             type: 'object',
             properties: {

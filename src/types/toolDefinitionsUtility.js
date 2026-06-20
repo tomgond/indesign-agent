@@ -7,7 +7,7 @@ export const utilityToolDefinitions = [
     // =================== UTILITY TOOLS ===================
     {
         name: 'execute_indesign_code',
-        description: 'Execute arbitrary JavaScript code in the InDesign UXP context. WARNING: this runs with full InDesign DOM access and can create, modify, or destroy documents. Use only as a last resort when no other tool covers the operation.',
+        description: 'Disabled by default. Executes arbitrary JavaScript code in the InDesign UXP context only when ALLOW_EXECUTE_INDESIGN_CODE=true is set for local development.',
         inputSchema: {
             type: 'object',
             properties: {

@@ -1,7 +1,7 @@
 /**
  * Core script execution functionality
  */
-const BRIDGE_URL = 'http://127.0.0.1:3000';
+export const BRIDGE_URL = process.env.BRIDGE_URL || 'http://127.0.0.1:3000';
 
 // L1: read auth token from env — must match BRIDGE_TOKEN set when starting bridge/server.js
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || null;
@@ -54,14 +54,32 @@ export class ScriptExecutor {
      */
     static async isUXPAvailable() {
         try {
+            const status = await ScriptExecutor.bridgeStatus();
+            return status.pluginConnected === true;
+        } catch {
+            return false;
+        }
+    }
+
+    static async bridgeStatus() {
+        try {
             const response = await fetch(`${BRIDGE_URL}/status`, {
                 headers: bridgeHeaders(),
                 signal: AbortSignal.timeout(1000),
             });
             const data = await response.json();
-            return data.connected === true;
-        } catch {
-            return false;
+            return {
+                ok: response.ok,
+                bridgeUrl: BRIDGE_URL,
+                pluginConnected: data.connected === true,
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                bridgeUrl: BRIDGE_URL,
+                pluginConnected: false,
+                error: error.message,
+            };
         }
     }
 

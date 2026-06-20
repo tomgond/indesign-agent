@@ -102,6 +102,8 @@ temp_script.jsx
 *.tmp
 *.temp
 .cache/
+.agent/
+*.pcap
 
 # OS generated files
 Thumbs.db

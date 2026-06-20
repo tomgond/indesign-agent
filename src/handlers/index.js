@@ -26,6 +26,7 @@ export { ExportHandlers } from './exportHandlers.js';
 // System and Utility
 export { UtilityHandlers } from './utilityHandlers.js';
 export { HelpHandlers } from './helpHandlers.js';
+export { TemplateHandlers } from './templateHandlers.js';
 
 /**
  * Handler Categories Overview:

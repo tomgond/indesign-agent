@@ -4,6 +4,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import path from 'node:path';
 import { allToolDefinitions } from '../types/index.js';
 import {
     BookHandlers,
@@ -17,9 +18,21 @@ import {
     PageItemHandlers,
     StyleHandlers,
     TextHandlers,
-    UtilityHandlers
+    UtilityHandlers,
+    TemplateHandlers
 } from '../handlers/index.js';
 import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
+import { getWorkspace } from './workspaceState.js';
+import { assertWorkspacePath } from '../utils/pathGuard.js';
+
+const TEMPLATE_TOOL_NAMES = new Set([
+    'init_template_workspace','open_working_copy','get_workspace_status','save_working_copy','save_version','list_versions','rollback_to_version','validate_workspace_path','validate_active_document_is_working_copy',
+    'inspect_document_bundle','inspect_page_items_v2','inspect_styles','inspect_swatches','inspect_layers','inspect_parent_pages','export_page_preview','export_spread_preview','return_preview_as_image',
+    'create_page','duplicate_page','create_text_frame','create_image_frame','create_shape','create_line','place_image','apply_styles','apply_swatches','set_text_content','set_bounds','move_item','resize_item','rotate_item','lock_item','unlock_item','group_items','ungroup_items','bring_to_front','send_to_back','align_items','distribute_items','fit_content_to_frame','fit_frame_to_content',
+    'rename_page_item','label_object','get_object_label','find_objects_by_label','list_named_objects','create_reference_underlay','hide_reference_underlay','remove_reference_underlay','record_visual_review','list_visual_reviews','mark_derivative_accepted','get_derivative_status',
+    'check_overset_text','check_missing_links','check_missing_fonts','check_hidden_or_locked_problem_items','run_preflight','run_template_preflight'
+]);
+const TEMPLATE_OVERLAY_NAMES = new Set(['duplicate_page', 'create_text_frame']);
 
 export class InDesignMCPServer {
     constructor() {
@@ -56,6 +69,16 @@ export class InDesignMCPServer {
     }
 
     async handleToolCall(name, args) {
+        if (TEMPLATE_TOOL_NAMES.has(name) && (!TEMPLATE_OVERLAY_NAMES.has(name) || this.workspaceActive())) {
+            return await TemplateHandlers.handle(name, args);
+        }
+
+        const workspaceDocResult = await this.handleWorkspaceDocumentTool(name, args || {});
+        if (workspaceDocResult) return workspaceDocResult;
+
+        const workspaceDenied = this.guardWorkspaceFileTool(name, args || {});
+        if (workspaceDenied) return workspaceDenied;
+
         // Document Management
         switch (name) {
             case 'get_document_info': return await DocumentHandlers.getDocumentInfo();
@@ -230,10 +253,54 @@ export class InDesignMCPServer {
         }
     }
 
+    workspaceActive() {
+        try { getWorkspace(); return true; } catch { return false; }
+    }
+
+    async handleWorkspaceDocumentTool(name, args) {
+        let manifest;
+        try { manifest = getWorkspace(); } catch { return null; }
+        try {
+            if (name === 'save_document') {
+                if (args.filePath && path.resolve(args.filePath) !== path.resolve(manifest.workingCopyPath)) {
+                    throw new Error('Template workspace active: use save_working_copy; custom save paths are not allowed');
+                }
+                return await TemplateHandlers.save_working_copy();
+            }
+            if (name === 'close_document' && (args.saveOptions || 'ASK') !== 'DISCARD') {
+                throw new Error('Template workspace active: close_document may only DISCARD. Use save_working_copy first.');
+            }
+        } catch (error) {
+            return formatErrorResponse(error.message, name);
+        }
+        return null;
+    }
+
+    guardWorkspaceFileTool(name, args) {
+        let manifest;
+        try { manifest = getWorkspace(); } catch { return null; }
+        try {
+            if (name === 'open_document' && path.resolve(args.filePath || '') !== path.resolve(manifest.workingCopyPath)) {
+                throw new Error('Template workspace active: open only with open_working_copy');
+            }
+            if (name === 'save_document' && args.filePath) assertWorkspacePath(args.filePath, { kind: 'work', manifest });
+            if (name === 'export_document_xml') assertWorkspacePath(args.filePath, { kind: 'exports', manifest });
+            if (name === 'export_pdf') assertWorkspacePath(args.filePath, { kind: 'exports', manifest });
+            if (name === 'export_images' || name === 'package_document') assertWorkspacePath(args.folderPath, { kind: 'exports', manifest });
+        } catch (error) {
+            return formatErrorResponse(error.message, name);
+        }
+        return null;
+    }
+
     async run() {
         const transport = new StdioServerTransport();
-        await this.server.connect(transport);
+        await this.connect(transport);
         // Don't log to stdout as it interferes with MCP protocol
         // console.log('InDesign MCP Server started');
+    }
+
+    async connect(transport) {
+        await this.server.connect(transport);
     }
 } 

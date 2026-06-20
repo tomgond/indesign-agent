@@ -95,6 +95,16 @@ npm install
 npm start
 ```
 
+By default the MCP server listens over Streamable HTTP on `0.0.0.0:3333`:
+
+```bash
+MCP_TRANSPORT=http MCP_HOST=0.0.0.0 MCP_PORT=3333 BRIDGE_URL=http://127.0.0.1:3000 node src/index.js
+```
+
+MCP endpoint: `POST /mcp`. Operational checks: `GET /health`, `GET /bridge-status`.
+First-pass HTTP MCP auth is intentionally not enforced; use only on a private LAN/VPN/tunnel.
+Use `MCP_TRANSPORT=stdio` for the old stdio transport.
+
 ### 5. Configure Claude
 
 Add to `~/.claude.json` (or your MCP client config):

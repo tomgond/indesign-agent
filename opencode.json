@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "indesign": {
+      "type": "remote",
+      "url": "http://192.168.1.94:3333/mcp",
+      "enabled": true,
+      "timeout": 30000
+    }
+  }
+}

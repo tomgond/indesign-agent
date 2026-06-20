@@ -12,6 +12,13 @@ export class UtilityHandlers {
     static async executeInDesignCode(args) {
         const { code, dangerousConfirmation } = args;
 
+        if (process.env.ALLOW_EXECUTE_INDESIGN_CODE !== 'true') {
+            return formatErrorResponse(
+                'execute_indesign_code is disabled by default. Set ALLOW_EXECUTE_INDESIGN_CODE=true only for local development.',
+                "Execute InDesign Code"
+            );
+        }
+
         if (dangerousConfirmation !== 'I understand this executes arbitrary InDesign code') {
             return formatErrorResponse(
                 'execute_indesign_code requires dangerousConfirmation: "I understand this executes arbitrary InDesign code"',

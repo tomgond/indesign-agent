@@ -2,6 +2,7 @@
  * Main entry point for InDesign MCP Server
  */
 import { InDesignMCPServer } from './core/InDesignMCPServer.js';
+import { startHttpTransport } from './core/httpTransport.js';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -43,7 +44,11 @@ async function main() {
     try {
         await ensureBridge();
         const server = new InDesignMCPServer();
-        await server.run();
+        if ((process.env.MCP_TRANSPORT || 'http') === 'stdio') {
+            await server.run();
+        } else {
+            await startHttpTransport(server);
+        }
     } catch (error) {
         // Log to stderr instead of stdout to avoid interfering with MCP protocol
         console.error('Failed to start server:', error);

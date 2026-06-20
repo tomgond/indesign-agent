@@ -7,11 +7,15 @@ export const contentToolDefinitions = [
     // =================== TEXT MANAGEMENT ===================
     {
         name: 'create_text_frame',
-        description: 'Create a text frame on the specified page (defaults to active page in InDesign UI)',
+        description: 'Create a text frame. When a template workspace is active, this is routed through the workspace-safe template implementation using pageIndex, bounds, text, name, and label.',
         inputSchema: {
             type: 'object',
             properties: {
                 content: { type: 'string', description: 'Text content for the frame' },
+                text: { type: 'string', description: 'Template-routed text content for the frame' },
+                bounds: { type: 'array', description: 'Template-routed geometric bounds [top,left,bottom,right]' },
+                name: { type: 'string', description: 'Template-routed page item name' },
+                label: { type: 'object', description: 'Template-routed label metadata' },
                 x: { type: 'number', description: 'X position in mm', default: 10 },
                 y: { type: 'number', description: 'Y position in mm', default: 10 },
                 width: { type: 'number', description: 'Width in mm', default: 100 },
@@ -94,11 +98,16 @@ export const contentToolDefinitions = [
     // =================== GRAPHICS MANAGEMENT ===================
     {
         name: 'place_image',
-        description: 'Place an image on the specified page (defaults to active page in InDesign UI)',
+        description: 'Place an image. Template mode routes through workspace-safe frame placement; use imagePath/filePath under workspace assets/ or input/.',
         inputSchema: {
             type: 'object',
             properties: {
                 filePath: { type: 'string', description: 'Path to the image file' },
+                imagePath: { type: 'string', description: 'Template alias for filePath' },
+                objectId: { type: 'number', description: 'Template destination frame object id' },
+                bounds: { type: 'array', description: 'Template-routed image frame bounds [top,left,bottom,right]' },
+                name: { type: 'string', description: 'Template-routed page item name' },
+                label: { type: 'object', description: 'Template-routed label metadata' },
                 x: { type: 'number', description: 'X position in mm', default: 10 },
                 y: { type: 'number', description: 'Y position in mm', default: 10 },
                 width: { type: 'number', description: 'Width in mm' },
@@ -109,11 +118,11 @@ export const contentToolDefinitions = [
                 fitMode: {
                     type: 'string',
                     description: 'Image fitting mode',
-                    enum: ['PROPORTIONALLY', 'FILL_FRAME', 'FIT_CONTENT', 'FIT_FRAME'],
+                    enum: ['PROPORTIONALLY', 'FILL_FRAME', 'FIT_CONTENT', 'FIT_FRAME', 'proportionally', 'fillProportionally', 'contentToFrame', 'frameToContent', 'centerContent'],
                     default: 'PROPORTIONALLY'
                 },
             },
-            required: ['filePath'],
+            required: [],
         },
     },
     {

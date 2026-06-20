@@ -29,11 +29,12 @@ export const pageToolDefinitions = [
     },
     {
         name: 'duplicate_page',
-        description: 'Duplicate a page',
+        description: 'Duplicate a page. When a template workspace is active, this is routed through the workspace-safe template implementation.',
         inputSchema: {
             type: 'object',
             properties: {
                 pageIndex: { type: 'number', description: 'Page index to duplicate' },
+                derivativeId: { type: 'string', description: 'Optional template derivative id when routed through the workspace-safe implementation' },
                 position: { type: 'string', enum: ['AT_END', 'AT_BEGINNING', 'BEFORE', 'AFTER'], default: 'AT_END' },
                 referencePageIndex: { type: 'number', description: 'Reference page index (for BEFORE/AFTER positioning)' },
             },
