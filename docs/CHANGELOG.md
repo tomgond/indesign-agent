@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Group handlers now identify only real `Group` objects during `ungroup`, `get_group_info`, `add_item_to_group`, `remove_item_from_group`, `list_groups`, and `set_group_properties`.
+- `add_item_to_group` and `remove_item_from_group` now use ungroup-and-regroup behavior compatible with the live UXP environment instead of calling unreliable `group.add()` or `group.remove()`.
+- Export and packaging handlers now normalize file and folder targets, create missing parent directories, export image pages through extension-based formats accepted by the live endpoint, and call `packageForPrint()` with the full current parameter list.
+
+### Added
+- Canonical live validation note at [docs/live-mcp-validation.md](live-mcp-validation.md).
+
 ## [1.1.0] - 2025-07-27
 
 ### 🚀 Added

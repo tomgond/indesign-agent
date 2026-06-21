@@ -14,7 +14,11 @@ class PageItemGroupTest {
         console.log('🚀 Starting InDesign MCP Server...');
 
         this.server = spawn('node', ['src/index.js'], {
-            stdio: ['pipe', 'pipe', 'pipe']
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: {
+                ...process.env,
+                MCP_TRANSPORT: 'stdio'
+            }
         });
 
         // Wait for server to start
@@ -94,12 +98,11 @@ class PageItemGroupTest {
                         return false;
                     }
                 } catch (parseError) {
-                    console.log(`❌ ${name}: FAIL - Invalid JSON response`);
-                    console.log(`   Raw response: ${resultText}\n`);
+                    console.log(`❌ ${name}: FAIL - ${resultText}\n`);
                     this.testResults.push({
                         test: name,
                         status: 'FAIL',
-                        result: 'Invalid JSON response'
+                        result: resultText
                     });
                     return false;
                 }

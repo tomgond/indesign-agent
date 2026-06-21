@@ -292,7 +292,9 @@ export class InDesignMCPServer {
             if (name === 'save_document' && args.filePath) assertWorkspacePath(args.filePath, { kind: 'work', manifest });
             if (name === 'export_document_xml') assertWorkspacePath(args.filePath, { kind: 'exports', manifest });
             if (name === 'export_pdf') assertWorkspacePath(args.filePath, { kind: 'exports', manifest });
-            if (name === 'export_images' || name === 'package_document') assertWorkspacePath(args.folderPath, { kind: 'exports', manifest });
+            if (name === 'export_images' || name === 'package_document') {
+                assertWorkspacePath(args.outputPath || args.folderPath, { kind: 'exports', manifest });
+            }
         } catch (error) {
             return formatErrorResponse(error.message, name);
         }

@@ -128,11 +128,14 @@ Add to `~/.claude.json` (or your MCP client config):
 # Quick sanity check (4 core tools)
 node tests/test-uxp-handlers.js
 
-# Full suite (27 tests across all handler categories)
+# Broad local suite
 node tests/test-all-handlers.js
+
+# Focused live regression pass
+node tests/test-mcp-live-regressions.js
 ```
 
-Current status: **27/27 passing** across all handler categories.
+Live pass/fail details are tracked in [docs/live-mcp-validation.md](docs/live-mcp-validation.md). The local suites are useful regression coverage, but they do not imply that every listed tool has been revalidated against the current remote MCP endpoint.
 
 ---
 

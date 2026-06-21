@@ -13,6 +13,39 @@ export class GroupHandlers {
             }
         `;
 
+    static groupHelper = `
+            function isGroupItem(item) {
+                if (!item) return false;
+                try {
+                    if (item.constructor && item.constructor.name === 'Group') return true;
+                } catch(e) {}
+                try {
+                    if (typeof item.ungroup === 'function') return true;
+                } catch(e) {}
+                return false;
+            }
+
+            function getGroupChildren(group) {
+                const children = [];
+                if (!group) return children;
+                let source = null;
+                try {
+                    source = group.pageItems;
+                } catch(e) {}
+                if (!source) {
+                    try {
+                        source = group.allPageItems;
+                    } catch(e) {}
+                }
+                if (!source) return children;
+                for (let i = 0; i < source.length; i++) {
+                    const child = collectionItem(source, i);
+                    if (child) children.push(child);
+                }
+                return children;
+            }
+        `;
+
     /**
      * Create a group from selected items
      */
@@ -105,17 +138,14 @@ export class GroupHandlers {
 
         const code = `
             ${GroupHandlers.collectionHelper}
+            ${GroupHandlers.groupHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             if (${groupIndex} < 0 || ${groupIndex} >= page.allPageItems.length) return { success: false, error: 'Group index out of range' };
             const item = collectionItem(page.allPageItems, ${groupIndex});
-            let isGroup = false;
-            try {
-                isGroup = typeof item.pageItems !== 'undefined' || item.constructor?.name === 'Group';
-            } catch(e) {}
-            if (!isGroup) return { success: false, error: 'Selected item is not a group' };
+            if (!isGroupItem(item)) return { success: false, error: 'Selected item is not a group' };
             let itemCount = 0;
             try { itemCount = item.allPageItems.length; } catch(e) {}
             try {
@@ -140,21 +170,19 @@ export class GroupHandlers {
 
         const code = `
             ${GroupHandlers.collectionHelper}
+            ${GroupHandlers.groupHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             if (${groupIndex} < 0 || ${groupIndex} >= page.allPageItems.length) return { success: false, error: 'Group index out of range' };
             const item = collectionItem(page.allPageItems, ${groupIndex});
-            let isGroup = false;
-            try {
-                isGroup = typeof item.pageItems !== 'undefined' || item.constructor?.name === 'Group';
-            } catch(e) {}
-            if (!isGroup) return { success: false, error: 'Selected item is not a group' };
+            if (!isGroupItem(item)) return { success: false, error: 'Selected item is not a group' };
             const contents = [];
             try {
-                for (let i = 0; i < item.allPageItems.length; i++) {
-                    const groupItem = collectionItem(item.allPageItems, i);
+                const groupChildren = getGroupChildren(item);
+                for (let i = 0; i < groupChildren.length; i++) {
+                    const groupItem = groupChildren[i];
                     let type = 'Unknown';
                     try { type = groupItem.constructor?.name || 'Unknown'; } catch(e) {}
                     contents.push({ index: i, type, id: groupItem.id });
@@ -186,25 +214,42 @@ export class GroupHandlers {
 
         const code = `
             ${GroupHandlers.collectionHelper}
+            ${GroupHandlers.groupHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             if (${groupIndex} < 0 || ${groupIndex} >= page.allPageItems.length) return { success: false, error: 'Group index out of range' };
             const group = collectionItem(page.allPageItems, ${groupIndex});
-            let isGroup = false;
-            try {
-                isGroup = typeof group.pageItems !== 'undefined' || group.constructor?.name === 'Group';
-            } catch(e) {}
-            if (!isGroup) return { success: false, error: 'Selected item is not a group' };
+            if (!isGroupItem(group)) return { success: false, error: 'Selected item is not a group' };
             if (${itemIndex} < 0 || ${itemIndex} >= page.allPageItems.length) return { success: false, error: 'Item index out of range' };
             const item = collectionItem(page.allPageItems, ${itemIndex});
+            if (!item) return { success: false, error: 'Target item not found' };
+            if (item.id === group.id) return { success: false, error: 'Cannot add a group to itself' };
+
+            const children = getGroupChildren(group);
+            const originalName = group.name || '';
+            const originalVisible = group.visible;
+            const originalLocked = group.locked;
+
+            for (let i = 0; i < children.length; i++) {
+                if (children[i] && children[i].id === item.id) {
+                    return { success: true, groupId: group.id, itemId: item.id, alreadyMember: true };
+                }
+            }
+
             try {
-                group.add(item);
+                if (originalLocked) group.locked = false;
+                group.ungroup();
+                const regroupItems = children.concat([item]);
+                const newGroup = doc.groups.add(regroupItems);
+                newGroup.name = originalName;
+                newGroup.visible = originalVisible;
+                newGroup.locked = originalLocked;
+                return { success: true, groupId: newGroup.id, itemId: item.id };
             } catch(e) {
                 return { success: false, error: 'Failed to add item to group: ' + e.message };
             }
-            return { success: true, groupId: group.id, itemId: item.id };
         `;
 
         const result = await ScriptExecutor.executeViaUXP(code);
@@ -221,28 +266,54 @@ export class GroupHandlers {
 
         const code = `
             ${GroupHandlers.collectionHelper}
+            ${GroupHandlers.groupHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             if (${groupIndex} < 0 || ${groupIndex} >= page.allPageItems.length) return { success: false, error: 'Group index out of range' };
             const group = collectionItem(page.allPageItems, ${groupIndex});
-            let isGroup = false;
-            try {
-                isGroup = typeof group.pageItems !== 'undefined' || group.constructor?.name === 'Group';
-            } catch(e) {}
-            if (!isGroup) return { success: false, error: 'Selected item is not a group' };
-            let groupItems;
-            try { groupItems = group.allPageItems; } catch(e) { return { success: false, error: 'Cannot access group items' }; }
+            if (!isGroupItem(group)) return { success: false, error: 'Selected item is not a group' };
+            const groupItems = getGroupChildren(group);
             if (${itemIndex} < 0 || ${itemIndex} >= groupItems.length) return { success: false, error: 'Item index out of range in group' };
-            const item = collectionItem(groupItems, ${itemIndex});
+            const item = groupItems[${itemIndex}];
             const itemId = item.id;
+            const originalName = group.name || '';
+            const originalVisible = group.visible;
+            const originalLocked = group.locked;
+            const remainingItems = [];
+            for (let i = 0; i < groupItems.length; i++) {
+                if (i !== ${itemIndex}) remainingItems.push(groupItems[i]);
+            }
+
             try {
-                group.remove(item);
+                if (originalLocked) group.locked = false;
+                group.ungroup();
+                if (remainingItems.length >= 2) {
+                    const newGroup = doc.groups.add(remainingItems);
+                    newGroup.name = originalName;
+                    newGroup.visible = originalVisible;
+                    newGroup.locked = originalLocked;
+                    return {
+                        success: true,
+                        groupId: newGroup.id,
+                        removedItemId: itemId,
+                        remainingItemCount: remainingItems.length
+                    };
+                }
+                if (remainingItems.length === 1) {
+                    return {
+                        success: true,
+                        removedItemId: itemId,
+                        remainingItemCount: 1,
+                        groupCollapsedToSingleItem: true,
+                        remainingItemId: remainingItems[0].id
+                    };
+                }
+                return { success: true, removedItemId: itemId, remainingItemCount: 0, groupRemoved: true };
             } catch(e) {
                 return { success: false, error: 'Failed to remove item from group: ' + e.message };
             }
-            return { success: true, groupId: group.id, removedItemId: itemId };
         `;
 
         const result = await ScriptExecutor.executeViaUXP(code);
@@ -259,6 +330,7 @@ export class GroupHandlers {
 
         const code = `
             ${GroupHandlers.collectionHelper}
+            ${GroupHandlers.groupHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
@@ -266,13 +338,9 @@ export class GroupHandlers {
             const groups = [];
             for (let i = 0; i < page.allPageItems.length; i++) {
                 const item = collectionItem(page.allPageItems, i);
-                let isGroup = false;
-                try {
-                    isGroup = typeof item.pageItems !== 'undefined' || item.constructor?.name === 'Group';
-                } catch(e) {}
-                if (isGroup) {
+                if (isGroupItem(item)) {
                     let itemCount = 0;
-                    try { itemCount = item.allPageItems.length; } catch(e) {}
+                    try { itemCount = getGroupChildren(item).length; } catch(e) {}
                     groups.push({
                         pageItemIndex: i,
                         name: item.name || 'Unnamed',
@@ -300,17 +368,15 @@ export class GroupHandlers {
         const { pageIndex, groupIndex, visible, locked, name } = args;
 
         const code = `
+            ${GroupHandlers.collectionHelper}
+            ${GroupHandlers.groupHelper}
             if (app.documents.length === 0) return { success: false, error: 'No document open' };
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             if (${groupIndex} < 0 || ${groupIndex} >= page.allPageItems.length) return { success: false, error: 'Group index out of range' };
             const group = collectionItem(page.allPageItems, ${groupIndex});
-            let isGroup = false;
-            try {
-                isGroup = typeof group.pageItems !== 'undefined' || group.constructor?.name === 'Group';
-            } catch(e) {}
-            if (!isGroup) return { success: false, error: 'Selected item is not a group' };
+            if (!isGroupItem(group)) return { success: false, error: 'Selected item is not a group' };
             if (${visible} !== null && ${visible} !== undefined) group.visible = ${visible};
             if (${locked} !== null && ${locked} !== undefined) group.locked = ${locked};
             if (${JSON.stringify(name)} !== null && ${JSON.stringify(name)} !== undefined) group.name = ${JSON.stringify(name)};

@@ -112,6 +112,15 @@ const TEST_SUITES = [
         category: 'advanced'
     },
     {
+        name: 'Live MCP Regressions',
+        description: 'Focused regression checks for recent MCP routing and live-runtime fixes',
+        tests: [
+            'test-mcp-live-regressions.js'
+        ],
+        required: false,
+        category: 'advanced'
+    },
+    {
         name: 'Standard Document',
         description: 'Tests creating a complete document with proper layout and styling',
         tests: [
