@@ -45,7 +45,7 @@ export class GroupHandlers {
                 return children;
             }
 
-            function itemId(item) {
+            function getItemId(item) {
                 try { return item && item.id; } catch(e) { return null; }
             }
 
@@ -53,7 +53,7 @@ export class GroupHandlers {
                 if (id === undefined || id === null) return null;
                 for (let i = 0; i < collection.length; i++) {
                     const item = collectionItem(collection, i);
-                    if (itemId(item) === id) return item;
+                    if (getItemId(item) === id) return item;
                 }
                 return null;
             }
@@ -71,7 +71,7 @@ export class GroupHandlers {
             function childIdSet(group) {
                 const ids = {};
                 const children = getGroupChildren(group);
-                for (let i = 0; i < children.length; i++) ids[itemId(children[i])] = true;
+                for (let i = 0; i < children.length; i++) ids[getItemId(children[i])] = true;
                 return ids;
             }
 
@@ -81,8 +81,8 @@ export class GroupHandlers {
                 const candidates = [];
                 for (let i = 0; i < items.length; i++) {
                     const item = items[i];
-                    const id = itemId(item);
-                    if (!item || id === itemId(group) || childIds[id] || isGroupItem(item)) continue;
+                    const id = getItemId(item);
+                    if (!item || id === getItemId(group) || childIds[id] || isGroupItem(item)) continue;
                     candidates.push(item);
                 }
                 return candidates.length === 1 ? candidates[0] : null;
