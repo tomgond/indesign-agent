@@ -318,24 +318,77 @@ export class TemplateHandlers {
 
 function inspectionAndChecks(name) {
     const common = `
-        const layers = arr(doc.layers, (x,i)=>({index:i, id:safe(()=>x.id), name:safe(()=>x.name), visible:safe(()=>x.visible), locked:safe(()=>x.locked), printable:safe(()=>x.printable), itemCount:safe(()=>len(x.pageItems), null)}));
-        const swatches = arr(doc.swatches, (x,i)=>({index:i, id:safe(()=>x.id), name:safe(()=>x.name), type:safe(()=>x.constructor.name), colorModel:safe(()=>String(x.model)), colorSpace:safe(()=>String(x.space)), colorValue:safe(()=>x.colorValue), usageCount:null, usageCountAvailable:false}));
-        const styles = { paragraph: arr(doc.paragraphStyles, (x,i)=>({index:i,id:safe(()=>x.id),name:safe(()=>x.name)})), character: arr(doc.characterStyles, (x,i)=>({index:i,id:safe(()=>x.id),name:safe(()=>x.name)})), object: arr(doc.objectStyles, (x,i)=>({index:i,id:safe(()=>x.id),name:safe(()=>x.name)})), table: [], cell: [] };
-        const pages = arr(doc.pages, (p,i)=>({index:i,name:safe(()=>p.name),bounds:safe(()=>p.bounds), appliedParent:safe(()=>p.appliedMaster.name)}));
-        const spreads = arr(doc.spreads, (s,i)=>({index:i,name:safe(()=>s.name),pages:arr(s.pages,(p)=>safe(()=>p.name))}));
-        const items = arr(doc.allPageItems || doc.pageItems, (it,i)=>({ ...meta(it), index:i, label:readLabel(it), text:safe(()=>({excerpt:String(it.contents||'').slice(0,500), overset:!!it.overflows}),{}), image:{}, shape:{} }));
+        function enumString(v){ try { return v == null ? null : String(v); } catch(e){ return null; } }
+        function idOf(x){ return safe(()=>x && x.id, null); }
+        function collectionIndexById(coll, obj) {
+            const id = idOf(obj);
+            if (id == null) return null;
+            for (let i=0;i<len(coll);i++) if (idOf(at(coll,i)) === id) return i;
+            return null;
+        }
+        function swatchRef(x){
+            if (!x || x.isValid === false) return null;
+            return {
+                id: safe(()=>x.id),
+                name: safe(()=>x.name),
+                type: safe(()=>x.constructor.name),
+                colorModel: safe(()=>enumString(x.model)),
+                colorSpace: safe(()=>enumString(x.space)),
+                colorValue: safe(()=>x.colorValue),
+                tint: safe(()=>x.tintValue, null)
+            };
+        }
+        function marginInfo(m){
+            if (!m || m.isValid === false) return null;
+            return {
+                top: safe(()=>m.top),
+                bottom: safe(()=>m.bottom),
+                left: safe(()=>m.left),
+                right: safe(()=>m.right),
+                inside: safe(()=>m.left),
+                outside: safe(()=>m.right),
+                columnCount: safe(()=>m.columnCount),
+                columnGutter: safe(()=>m.columnGutter)
+            };
+        }
+        function pageSizeFromBounds(b){ return Array.isArray(b) && b.length === 4 ? { width: b[3]-b[1], height: b[2]-b[0] } : null; }
+        function styleGroupName(s){ const p = safe(()=>s.parent, null); const t = safe(()=>p && p.constructor && p.constructor.name, ''); return /Group/i.test(t) ? safe(()=>p.name, null) : null; }
+        function paragraphStyleInfo(s,i){ return { index:i, id:safe(()=>s.id), name:safe(()=>s.name), group:styleGroupName(s), basedOn:safe(()=>s.basedOn && s.basedOn.name, null), fontFamily:safe(()=>s.appliedFont && s.appliedFont.fontFamily, null), fontStyle:safe(()=>s.fontStyle, null), pointSize:safe(()=>s.pointSize, null), leading:safe(()=>s.leading, null), tracking:safe(()=>s.tracking, null), fillColor:swatchRef(safe(()=>s.fillColor, null)), justification:safe(()=>enumString(s.justification), null), leftIndent:safe(()=>s.leftIndent, null), rightIndent:safe(()=>s.rightIndent, null), firstLineIndent:safe(()=>s.firstLineIndent, null), spaceBefore:safe(()=>s.spaceBefore, null), spaceAfter:safe(()=>s.spaceAfter, null) }; }
+        function characterStyleInfo(s,i){ return { index:i, id:safe(()=>s.id), name:safe(()=>s.name), group:styleGroupName(s), basedOn:safe(()=>s.basedOn && s.basedOn.name, null), fontFamily:safe(()=>s.appliedFont && s.appliedFont.fontFamily, null), fontStyle:safe(()=>s.fontStyle, null), pointSize:safe(()=>s.pointSize, null), leading:safe(()=>s.leading, null), tracking:safe(()=>s.tracking, null), fillColor:swatchRef(safe(()=>s.fillColor, null)) }; }
+        function objectStyleInfo(s,i){ return { index:i, id:safe(()=>s.id), name:safe(()=>s.name), group:styleGroupName(s), basedOn:safe(()=>s.basedOn && s.basedOn.name, null), fillColor:swatchRef(safe(()=>s.fillColor, null)), strokeColor:swatchRef(safe(()=>s.strokeColor, null)), strokeWeight:safe(()=>s.strokeWeight, null), enableFill:safe(()=>s.enableFill, null), enableStroke:safe(()=>s.enableStroke, null), enableParagraphStyle:safe(()=>s.enableParagraphStyle, null), appliedParagraphStyle:safe(()=>s.appliedParagraphStyle && s.appliedParagraphStyle.name, null) }; }
+        function pageInfo(p,i){ const b = safe(()=>p.bounds, null); return { index:i, id:safe(()=>p.id), name:safe(()=>p.name), bounds:b, pageSize:pageSizeFromBounds(b), side:safe(()=>enumString(p.side), null), appliedParent:safe(()=>p.appliedMaster && p.appliedMaster.name, null), marginPreferences:marginInfo(safe(()=>p.marginPreferences, null)), itemCount:safe(()=>len(p.allPageItems || p.pageItems), null) }; }
+        function spreadInfo(s,i){ return { index:i, id:safe(()=>s.id), name:safe(()=>s.name), pages:arr(s.pages,(p)=>({ index:collectionIndexById(doc.pages, p), id:safe(()=>p.id), name:safe(()=>p.name) })), itemCount:safe(()=>len(s.allPageItems || s.pageItems), null) }; }
+        function parentPageInfo(m,i){ const mid = idOf(m); const appliedPages = arr(doc.pages,(p,pi)=>safe(()=>p.appliedMaster && p.appliedMaster.id, null) === mid ? pi : null).filter(x=>x !== null); return { index:i, id:safe(()=>m.id), name:safe(()=>m.name), pageCount:safe(()=>len(m.pages), null), appliedPages, pages:arr(m.pages,(p,pi)=>({ index:pi, name:safe(()=>p.name), bounds:safe(()=>p.bounds), pageSize:pageSizeFromBounds(safe(()=>p.bounds, null)), margins:marginInfo(safe(()=>p.marginPreferences, null)) })), pageItemsSummary:arr(m.allPageItems || m.pageItems || [], (it)=>({ objectId:safe(()=>it.id), name:safe(()=>it.name), type:safe(()=>it.constructor.name), bounds:safe(()=>it.geometricBounds), layerName:safe(()=>it.itemLayer.name) })) }; }
+        function textInfo(it){ const isText = /TextFrame/i.test(safe(()=>it.constructor.name,'')); if (!isText && safe(()=>it.contents, null) == null) return null; const text = safe(()=>it.texts && it.texts.item(0), null); const para = safe(()=>it.paragraphs && it.paragraphs.item(0), null); const range = safe(()=>it.textStyleRanges && it.textStyleRanges.item(0), null); const firstChar = safe(()=>it.characters && it.characters.item(0), null); const excerpt = args.includeTextExcerpt === false ? undefined : String(safe(()=>it.contents, '') || '').slice(0, 500); return { excerpt, textExcerpt:excerpt, storyId:safe(()=>it.parentStory.id, null), paragraphStyle:safe(()=>para.appliedParagraphStyle.name, safe(()=>text.appliedParagraphStyle.name, null)), characterStyle:safe(()=>range.appliedCharacterStyle.name, null), fontFamily:safe(()=>range.appliedFont.fontFamily, safe(()=>firstChar.appliedFont.fontFamily, null)), fontStyle:safe(()=>range.fontStyle, safe(()=>firstChar.fontStyle, null)), pointSize:safe(()=>range.pointSize, safe(()=>firstChar.pointSize, null)), leading:safe(()=>range.leading, safe(()=>firstChar.leading, null)), tracking:safe(()=>range.tracking, safe(()=>firstChar.tracking, null)), justification:safe(()=>enumString(para.justification), null), overset:!!safe(()=>it.overflows, false) }; }
+        function imageInfoForItem(it){ const hasGraphics = safe(()=>it.graphics && len(it.graphics) > 0, false); const g = hasGraphics ? safe(()=>at(it.graphics,0), null) : null; const link = safe(()=>g && g.itemLink, null); return { hasPlacedGraphic:!!g, linkName:safe(()=>link.name, null), linkPath:safe(()=>link.filePath, null), linkStatus:safe(()=>enumString(link.status), null), effectivePpi:safe(()=>g.effectivePpi, null), actualPpi:safe(()=>g.actualPpi, null) }; }
+        function shapeInfoForItem(it){ const type = safe(()=>it.constructor.name, null); const path0 = safe(()=>it.paths && len(it.paths) ? at(it.paths,0) : null, null); const points = path0 ? arr(path0.pathPoints, (pt)=>({ anchor:safe(()=>pt.anchor, null), leftDirection:safe(()=>pt.leftDirection, null), rightDirection:safe(()=>pt.rightDirection, null), pointType:safe(()=>enumString(pt.pointType), null) })) : []; return { shapeType:/Oval/i.test(type) ? 'oval' : /Polygon/i.test(type) ? 'polygon' : /GraphicLine/i.test(type) ? 'line' : /Rectangle|TextFrame/i.test(type) ? 'rectangle' : type, cornerRadius:safe(()=>it.topLeftCornerRadius, null), pathPoints:points.length <= 64 ? points : [], pathPointCount:points.length }; }
+        function pageIndexForItem(it){ const pp = safe(()=>it.parentPage, null); return pp ? collectionIndexById(doc.pages, pp) : null; }
+        function spreadIndexForItem(it){ const pp = safe(()=>it.parentPage, null); const sp = pp ? safe(()=>pp.parent, null) : safe(()=>it.parent, null); return sp ? collectionIndexById(doc.spreads, sp) : null; }
+        function itemInfo(it,i){ const layer = safe(()=>it.itemLayer, null); return { objectId:safe(()=>it.id), name:safe(()=>it.name), type:safe(()=>it.constructor.name), index:i, zOrderIndex:safe(()=>it.index, null), pageIndex:pageIndexForItem(it), spreadIndex:spreadIndexForItem(it), layerName:safe(()=>layer.name, null), layerId:safe(()=>layer.id, null), layerVisible:safe(()=>layer.visible, null), bounds:safe(()=>it.geometricBounds, null), geometricBounds:safe(()=>it.geometricBounds, null), visibleBounds:safe(()=>it.visibleBounds, null), coordinateUnit:'pt', rotation:safe(()=>it.rotationAngle, null), locked:safe(()=>it.locked, false), visible:safe(()=>it.visible, true), fillColor:swatchRef(safe(()=>it.fillColor, null)), strokeColor:swatchRef(safe(()=>it.strokeColor, null)), strokeWeight:safe(()=>it.strokeWeight, null), opacity:safe(()=>it.transparencySettings.blendingSettings.opacity, null), appliedObjectStyle:safe(()=>it.appliedObjectStyle.name, null), parentOrigin:safe(()=>it.overriddenMasterPageItem ? { objectId:it.overriddenMasterPageItem.id, name:it.overriddenMasterPageItem.name } : null, null), overridden:safe(()=>it.overridden, null), label:readLabel(it), text:textInfo(it), image:imageInfoForItem(it), shape:shapeInfoForItem(it) }; }
+        function itemSource(){ if (args.pageIndex != null) { const p = at(doc.pages, args.pageIndex); let out = arr(p.allPageItems || p.pageItems, x=>x); if (args.includeParentItems) out = out.concat(arr(safe(()=>p.masterPageItems, []), x=>x)); return out; } if (args.spreadIndex != null) { const s = at(doc.spreads, args.spreadIndex); return arr(s.allPageItems || s.pageItems, x=>x); } return arr(doc.allPageItems || doc.pageItems, x=>x); }
+        const dp = doc.documentPreferences;
+        const documentUnits = { horizontalMeasurementUnits:safe(()=>enumString(doc.viewPreferences.horizontalMeasurementUnits), null), verticalMeasurementUnits:safe(()=>enumString(doc.viewPreferences.verticalMeasurementUnits), null), rulerOrigin:safe(()=>enumString(doc.viewPreferences.rulerOrigin), null) };
+        const document = { name:doc.name, path:expected, pageCount:len(doc.pages), facingPages:safe(()=>dp.facingPages, null), pageWidth:safe(()=>dp.pageWidth, null), pageHeight:safe(()=>dp.pageHeight, null), pageSize:safe(()=>dp.pageSize, null), pageOrientation:safe(()=>enumString(dp.pageOrientation), null), bleed:{ top:safe(()=>dp.documentBleedTopOffset, null), bottom:safe(()=>dp.documentBleedBottomOffset, null), insideOrLeft:safe(()=>dp.documentBleedInsideOrLeftOffset, null), outsideOrRight:safe(()=>dp.documentBleedOutsideOrRightOffset, null), uniform:safe(()=>dp.documentBleedUniformSize, null) }, slug:{ top:safe(()=>dp.slugTopOffset, null), bottom:safe(()=>dp.slugBottomOffset, null), insideOrLeft:safe(()=>dp.slugInsideOrLeftOffset, null), outsideOrRight:safe(()=>dp.slugRightOrOutsideOffset, null), uniform:safe(()=>dp.documentSlugUniformSize, null) }, documentUnits };
+        const layers = arr(doc.layers, (x,i)=>({index:i, id:safe(()=>x.id), name:safe(()=>x.name), visible:safe(()=>x.visible), locked:safe(()=>x.locked), printable:safe(()=>x.printable), color:safe(()=>enumString(x.layerColor), null), itemCount:safe(()=>len(x.pageItems), null)}));
+        const swatches = arr(doc.swatches, (x,i)=>({index:i, ...swatchRef(x), usageCount:null, usageCountAvailable:false}));
+        const styles = { paragraph: arr(doc.paragraphStyles, paragraphStyleInfo), character: arr(doc.characterStyles, characterStyleInfo), object: arr(doc.objectStyles, objectStyleInfo), table: arr(safe(()=>doc.tableStyles, []), (x,i)=>({index:i,id:safe(()=>x.id),name:safe(()=>x.name),basedOn:safe(()=>x.basedOn.name,null),group:styleGroupName(x)})), cell: arr(safe(()=>doc.cellStyles, []), (x,i)=>({index:i,id:safe(()=>x.id),name:safe(()=>x.name),basedOn:safe(()=>x.basedOn.name,null),group:styleGroupName(x)})) };
+        const pages = arr(doc.pages, pageInfo);
+        const spreads = arr(doc.spreads, spreadInfo);
+        const parentPages = arr(doc.masterSpreads || [], parentPageInfo);
+        const inspectedItems = arr(itemSource(), itemInfo);
+        const visibleInspectItems = inspectedItems.filter(i => args.includeHidden || (i.visible !== false && i.layerVisible !== false));
     `;
     return `${common}
-        if (${q(name)} === 'inspect_document_bundle') return { success:true, document:{ name:doc.name, path:expected, pageCount:len(doc.pages) }, pages, spreads, layers, swatches, styles, parentPages:[], fonts:arr(doc.fonts,(f)=>({name:safe(()=>f.name),status:safe(()=>String(f.status))})), links:arr(doc.links,(l)=>({name:safe(()=>l.name),status:safe(()=>String(l.status)),path:safe(()=>l.filePath)})), warnings:[] };
-        if (${q(name)} === 'inspect_page_items_v2') return { success:true, items, warnings:[] };
+        if (${q(name)} === 'inspect_document_bundle') return { success:true, document, pageCount:len(doc.pages), pageSizes:pages.map(p=>({pageIndex:p.index, ...(p.pageSize||{})})), facingPages:document.facingPages, margins:pages.map(p=>({pageIndex:p.index, margins:p.marginPreferences})), bleed:document.bleed, slug:document.slug, spreads, pages, layers, swatches, styles, parentPages, fonts:arr(doc.fonts,(f)=>({name:safe(()=>f.name),fontFamily:safe(()=>f.fontFamily,null),fontStyle:safe(()=>f.fontStyleName,null),status:safe(()=>String(f.status))})), links:arr(doc.links,(l)=>({name:safe(()=>l.name),status:safe(()=>String(l.status)),path:safe(()=>l.filePath)})), documentUnits, basicPreflightState:safe(()=>({ preflightOff:doc.preflightOptions.preflightOff }), null), warnings:[] };
+        if (${q(name)} === 'inspect_page_items_v2') return { success:true, items:visibleInspectItems, warnings:[] };
         if (${q(name)} === 'inspect_styles') return { success:true, styles, warnings:[] };
         if (${q(name)} === 'inspect_swatches') return { success:true, swatches, warnings:[] };
         if (${q(name)} === 'inspect_layers') return { success:true, layers, warnings:[] };
-        if (${q(name)} === 'inspect_parent_pages') return { success:true, parentPages:arr(doc.masterSpreads||[],(m,i)=>({index:i,id:safe(()=>m.id),name:safe(()=>m.name)})), warnings:[] };
-        const oversetText = { ok:true, issues:items.filter(i=>i.text && i.text.overset).map(i=>({objectId:i.objectId,objectName:i.name,summary:'Text frame is overset'})), warnings:[] }; oversetText.ok = oversetText.issues.length===0;
+        if (${q(name)} === 'inspect_parent_pages') return { success:true, parentPages, warnings:[] };
+        const oversetText = { ok:true, issues:inspectedItems.filter(i=>i.text && i.text.overset).map(i=>({objectId:i.objectId,objectName:i.name,pageIndex:i.pageIndex,textExcerpt:i.text && (i.text.textExcerpt || i.text.excerpt),summary:'Text frame is overset'})), warnings:[] }; oversetText.ok = oversetText.issues.length===0;
         const missingLinks = { ok:true, issues:arr(doc.links,(l)=>({linkName:safe(()=>l.name),status:safe(()=>String(l.status)),path:safe(()=>l.filePath)})).filter(l=>!/normal|ok/i.test(l.status||'')), warnings:[] }; missingLinks.ok = missingLinks.issues.length===0;
         const missingFonts = { ok:true, issues:arr(doc.fonts,(f)=>({fontName:safe(()=>f.name),status:safe(()=>String(f.status))})).filter(f=>/missing|substitut/i.test(f.status||'')), warnings:[] }; missingFonts.ok = missingFonts.issues.length===0;
-        const hiddenLocked = { ok:true, issues:items.filter(i=>(i.label?.source==='agent_created' && (i.locked || i.visible===false)) || (i.label?.referenceOnly && i.visible!==false)).map(i=>({objectId:i.objectId,objectName:i.name,summary:'Generated/reference item visibility or lock needs review'})), warnings:[] }; hiddenLocked.ok = hiddenLocked.issues.length===0;
+        const hiddenLocked = { ok:true, issues:inspectedItems.filter(i=>(i.label?.source==='agent_created' && (i.locked || i.visible===false)) || (i.label?.referenceOnly && i.visible!==false)).map(i=>({objectId:i.objectId,objectName:i.name,summary:'Generated/reference item visibility or lock needs review'})), warnings:[] }; hiddenLocked.ok = hiddenLocked.issues.length===0;
         if (${q(name)} === 'check_overset_text') return { success:true, ...oversetText };
         if (${q(name)} === 'check_missing_links') return { success:true, ...missingLinks };
         if (${q(name)} === 'check_missing_fonts') return { success:true, ...missingFonts };
@@ -351,7 +404,52 @@ function layoutAndLabels(name) {
     return `
         const n = ${q(name)};
         let it, old;
-        if (n === 'create_page') { const p = doc.pages.add(); if (args.name) p.name=args.name; return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null }; }
+        function pagePresetSize(name) {
+            const k = String(name || '').toLowerCase();
+            if (k === 'a5') return { width: 148, height: 210, unit: 'mm' };
+            if (k === 'a3') return { width: 297, height: 420, unit: 'mm' };
+            if (k === 'square') return { width: 210, height: 210, unit: 'mm' };
+            if (k === 'social_square') return { width: 1080, height: 1080, unit: 'pt' };
+            return null;
+        }
+        function pageDims(args) {
+            let w = args.pageWidth ?? args.width;
+            let h = args.pageHeight ?? args.height;
+            let u = args.unit || 'pt';
+            const preset = pagePresetSize(args.pageSize);
+            if (preset) { w = preset.width; h = preset.height; u = preset.unit; }
+            if (w == null && h == null) return null;
+            if (!(Number.isFinite(Number(w)) && Number.isFinite(Number(h)))) throw new Error('pageWidth/pageHeight must be finite numbers');
+            w = toPt(Number(w), u);
+            h = toPt(Number(h), u);
+            if (w <= 0 || h <= 0) throw new Error('pageWidth/pageHeight must be positive');
+            if (args.orientation === 'landscape' && h > w) { const t = w; w = h; h = t; }
+            if (args.orientation === 'portrait' && w > h) { const t = w; w = h; h = t; }
+            return { width:w, height:h };
+        }
+        function applyPageMargins(p,args) {
+            if (args.marginTop == null && args.marginBottom == null && args.marginLeft == null && args.marginRight == null) return null;
+            const m = p.marginPreferences;
+            if (args.marginTop != null) m.top = toPt(Number(args.marginTop), args.unit || 'pt');
+            if (args.marginBottom != null) m.bottom = toPt(Number(args.marginBottom), args.unit || 'pt');
+            if (args.marginLeft != null) m.left = toPt(Number(args.marginLeft), args.unit || 'pt');
+            if (args.marginRight != null) m.right = toPt(Number(args.marginRight), args.unit || 'pt');
+            return { top:safe(()=>m.top), bottom:safe(()=>m.bottom), left:safe(()=>m.left), right:safe(()=>m.right) };
+        }
+        if (n === 'create_page') {
+            const dims = pageDims(args);
+            if (dims && !safe(()=>at(doc.pages,0).adjustLayout, null)) throw new Error('Page.adjustLayout is not available; cannot safely set per-page size');
+            const p = doc.pages.add();
+            try {
+                if (args.name) p.name=args.name;
+                if (dims) p.adjustLayout({ width:dims.width, height:dims.height });
+                const margins = applyPageMargins(p,args);
+                return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null, pageSize:safe(()=>({ width:p.bounds[3]-p.bounds[1], height:p.bounds[2]-p.bounds[0] }), dims), margins };
+            } catch (e) {
+                try { p.remove(); } catch(_) {}
+                throw e;
+            }
+        }
         if (n === 'duplicate_page') { const src=at(doc.pages,args.pageIndex||0); const p=src.duplicate(); return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null }; }
         if (n === 'create_text_frame') { const p=at(doc.pages,args.pageIndex||0); it=p.textFrames.add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); it.contents=args.text||''; applyBasics(it,args); applyTextStyles(it,args); return { success:true, ...meta(it), unit:'pt', text:{excerpt:String(it.contents).slice(0,500), overset:safe(()=>it.overflows,false)} }; }
         if (n === 'create_image_frame' || n === 'create_shape') { const p=at(doc.pages,args.pageIndex||0); const type=args.shapeType||'rectangle'; it=(type==='oval'?p.ovals:type==='polygon'?p.polygons:p.rectangles).add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); applyBasics(it,args); if(n==='create_image_frame' && args.imagePath){ it.place(args.imagePath, false); } return { success:true, ...meta(it), unit:'pt', link:safe(()=>({ name:it.graphics.item(0).itemLink.name, status:String(it.graphics.item(0).itemLink.status), path:it.graphics.item(0).itemLink.filePath }), null) }; }
