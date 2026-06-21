@@ -344,14 +344,19 @@ export class GroupHandlers {
             const originalName = group.name || '';
             const originalVisible = group.visible;
             const originalLocked = group.locked;
-            const remainingItems = [];
+            const remainingIds = [];
             for (let i = 0; i < groupItems.length; i++) {
-                if (i !== ${itemIndex}) remainingItems.push(groupItems[i]);
+                if (i !== ${itemIndex}) remainingIds.push(groupItems[i].id);
             }
 
             try {
                 if (originalLocked) group.locked = false;
                 group.ungroup();
+                const remainingItems = [];
+                for (let i = 0; i < remainingIds.length; i++) {
+                    const current = findById(page.allPageItems, remainingIds[i]);
+                    if (current) remainingItems.push(current);
+                }
                 if (remainingItems.length >= 2) {
                     const newGroup = doc.groups.add(remainingItems);
                     newGroup.name = originalName;
