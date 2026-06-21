@@ -21,7 +21,8 @@ function activeGuardCode(body) {
         if (!app.documents || app.documents.length === 0) return { success:false, error:'No document open' };
         const doc = app.activeDocument;
         let activePath = '';
-        try { activePath = String(await doc.filePath || doc.fullName || ''); } catch(e) {}
+        function nativePath(v) { try { return v ? String(v.nativePath || v.fsName || v) : ''; } catch(e) { return ''; } }
+        try { activePath = nativePath(await doc.filePath) || nativePath(await doc.fullName); } catch(e) {}
         if (!activePath || activePath !== expected) return { success:false, error:'Active document is not workspace working copy', activeDocumentPath: activePath || null, workingCopyPath: expected };
         ${body}
     `;
@@ -47,6 +48,11 @@ function jsHelpers() {
         function named(coll, name, kind){ const x = coll.itemByName(name); if (!x || x.isValid === false) throw new Error(kind+' not found: '+name); return x; }
         function readLabel(it){ let raw=''; try { raw = it.extractLabel ? it.extractLabel(${q(LABEL_KEY)}) : it.label; } catch(e) {} try { return raw ? JSON.parse(raw) : {}; } catch(e){ return { rawLabel: raw }; } }
         function writeLabel(it, label){ const raw=JSON.stringify(label); if (it.insertLabel) it.insertLabel(${q(LABEL_KEY)}, raw); else it.label=raw; }
+        function cleanName(name){ if (!name) return name; if (!/^[a-z0-9]+(?:_[a-z0-9]+)*__(?:[a-z0-9]+_?)*__[a-z0-9_]+$/.test(name) && /[\\/"'\x00-\x1f]/.test(name)) throw new Error('Invalid semantic object name'); return name; }
+        function toPt(v, unit){ return unit === 'mm' ? v * 2.8346456693 : v; }
+        function boundsInPt(bounds, unit){ if (!Array.isArray(bounds) || bounds.length !== 4) throw new Error('bounds must be [top,left,bottom,right]'); const b=bounds.map(Number); if (b.some(x=>!Number.isFinite(x))) throw new Error('bounds must contain finite numbers'); if (b[2] <= b[0] || b[3] <= b[1]) throw new Error('bounds must have positive width and height'); return b.map(x=>toPt(x, unit || 'pt')); }
+        function applyBasics(it,args){ if(args.name) it.name=cleanName(args.name); if(args.label) writeLabel(it,args.label); if(args.objectStyle) { const s=named(doc.objectStyles,args.objectStyle,'Object style'); if(it.applyObjectStyle) it.applyObjectStyle(s, false, false); else it.appliedObjectStyle=s; } if(args.fillSwatch) it.fillColor=named(doc.swatches,args.fillSwatch,'Swatch'); if(args.strokeSwatch) it.strokeColor=named(doc.swatches,args.strokeSwatch,'Swatch'); if(args.strokeWeight!=null) it.strokeWeight=args.strokeWeight; }
+        function applyTextStyles(it,args){ const text=safe(()=>it.texts.item(0)); if(!text || text.isValid===false) return; if(args.paragraphStyle){ const s=named(doc.paragraphStyles,args.paragraphStyle,'Paragraph style'); if(text.applyParagraphStyle) text.applyParagraphStyle(s, false); else text.appliedParagraphStyle=s; } if(args.characterStyle){ const s=named(doc.characterStyles,args.characterStyle,'Character style'); if(text.applyCharacterStyle) text.applyCharacterStyle(s); else text.appliedCharacterStyle=s; } }
     `;
 }
 
@@ -80,6 +86,10 @@ export class TemplateHandlers {
             const expected = ${q(path.resolve(m.workingCopyPath))};
             let activeDocumentPath = null;
             try { if (app.documents.length) activeDocumentPath = String(await app.activeDocument.filePath || app.activeDocument.fullName || ''); } catch(e) {}
+            try {
+                const fp = app.documents.length ? (await app.activeDocument.filePath || await app.activeDocument.fullName) : null;
+                activeDocumentPath = fp ? String(fp.nativePath || fp.fsName || fp) : activeDocumentPath;
+            } catch(e) {}
             return { ok: activeDocumentPath === expected, activeDocumentPath, workingCopyPath: expected };
         `);
     }
@@ -203,7 +213,7 @@ export class TemplateHandlers {
             })();
             return runGuarded(`${jsHelpers()} const args=${q({ ...args, imagePath })};
                 const { FitOptions } = require('indesign');
-                const layerName = args.layerName || '__reference_underlay';
+                const layerName = args.layerName || 'REFERENCE_UNDERLAY';
                 let layer = doc.layers.itemByName(layerName);
                 if (!layer || layer.isValid === false) layer = doc.layers.add({ name: layerName });
                 layer.visible = true; layer.locked = false; layer.printable = false;
@@ -222,7 +232,7 @@ export class TemplateHandlers {
 
     static hide_reference_underlay(args = {}) {
         return response(runGuarded(`
-            const layer = doc.layers.itemByName(${q(args.layerName || '__reference_underlay')});
+            const layer = doc.layers.itemByName(${q(args.layerName || 'REFERENCE_UNDERLAY')});
             if (!layer || layer.isValid === false) return { success:false, error:'Reference underlay layer not found' };
             layer.visible = false;
             return { success:true, action:'hide_reference_underlay', layerName:layer.name };
@@ -231,7 +241,7 @@ export class TemplateHandlers {
 
     static remove_reference_underlay(args = {}) {
         return response(runGuarded(`
-            const layer = doc.layers.itemByName(${q(args.layerName || '__reference_underlay')});
+            const layer = doc.layers.itemByName(${q(args.layerName || 'REFERENCE_UNDERLAY')});
             if (!layer || layer.isValid === false) return { success:false, error:'Reference underlay layer not found' };
             layer.locked = false;
             const count = layer.pageItems ? layer.pageItems.length : 0;
@@ -250,9 +260,37 @@ export class TemplateHandlers {
             if (fs.existsSync(out) && !args.overwrite) throw new Error('Preview exists; set overwrite=true');
             await runGuarded(`
                 const out = ${q(out)};
-                // ponytail: minimal export preference coverage; add per-version knobs after live UXP pass.
-                const { ExportFormat } = require('indesign');
-                await doc.exportFile(${ext === 'jpg' ? 'ExportFormat.jpegType' : 'ExportFormat.pngType'}, out, false);
+                const isJpg = ${q(ext === 'jpg')};
+                const pageIndex = ${q(args.pageIndex ?? null)};
+                const spreadIndex = ${q(args.spreadIndex ?? null)};
+                let pageString = null;
+                if (${q(kind)} === 'page') {
+                    if (pageIndex === null || pageIndex < 0 || pageIndex >= doc.pages.length) throw new Error('pageIndex out of range');
+                    pageString = String(pageIndex + 1);
+                } else {
+                    if (spreadIndex === null || spreadIndex < 0 || spreadIndex >= doc.spreads.length) throw new Error('spreadIndex out of range');
+                    const spread = doc.spreads.item(spreadIndex);
+                    const names = [];
+                    for (let i=0;i<spread.pages.length;i++) names.push(String(spread.pages.item(i).name || (i+1)));
+                    pageString = names.join(',');
+                }
+                try {
+                    if (isJpg && app.jpegExportPreferences) {
+                        app.jpegExportPreferences.pageString = pageString;
+                        if (${q(args.resolution || null)} !== null) app.jpegExportPreferences.exportResolution = ${q(args.resolution || null)};
+                    }
+                    if (!isJpg && app.pngExportPreferences) {
+                        app.pngExportPreferences.pageString = pageString;
+                        if (${q(args.resolution || null)} !== null) app.pngExportPreferences.exportResolution = ${q(args.resolution || null)};
+                        if (${q(args.transparentBackground ?? null)} !== null) app.pngExportPreferences.transparentBackground = ${q(args.transparentBackground ?? null)};
+                    }
+                } catch(e) {}
+                try {
+                    await doc.exportFile(isJpg ? 'jpg' : 'png', out, false);
+                } catch(firstError) {
+                    const { ExportFormat } = require('indesign');
+                    await doc.exportFile(isJpg ? ExportFormat.jpegType : ExportFormat.pngType, out, false);
+                }
                 return { success:true, path: out };
             `);
             const rec = { previewId: `preview_${Date.now()}_${kind}_${args.pageIndex ?? args.spreadIndex ?? 0}`, path: out, ...imageInfo(out), pageIndex: args.pageIndex ?? null, spreadIndex: args.spreadIndex ?? null, createdAt: new Date().toISOString() };
@@ -262,6 +300,14 @@ export class TemplateHandlers {
     }
 
     static uxpTool(name, args) {
+        if (name === 'create_image_frame' && args.imagePath) {
+            const m = loadWorkspace();
+            const imagePath = (() => {
+                try { return assertWorkspacePath(args.imagePath, { kind: 'assets', manifest: m }).path; }
+                catch { return assertWorkspacePath(args.imagePath, { kind: 'input', manifest: m }).path; }
+            })();
+            args = { ...args, imagePath };
+        }
         const a = q(args);
         if (['inspect_document_bundle','inspect_page_items_v2','inspect_styles','inspect_swatches','inspect_layers','inspect_parent_pages','check_overset_text','check_missing_links','check_missing_fonts','check_hidden_or_locked_problem_items','run_preflight','run_template_preflight'].includes(name)) {
             return runGuarded(`${jsHelpers()} const args=${a}; ${inspectionAndChecks(name)}`);
@@ -307,18 +353,18 @@ function layoutAndLabels(name) {
         let it, old;
         if (n === 'create_page') { const p = doc.pages.add(); if (args.name) p.name=args.name; return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null }; }
         if (n === 'duplicate_page') { const src=at(doc.pages,args.pageIndex||0); const p=src.duplicate(); return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null }; }
-        if (n === 'create_text_frame') { const p=at(doc.pages,args.pageIndex||0); it=p.textFrames.add(); it.geometricBounds=args.bounds; it.contents=args.text||''; if(args.name) it.name=args.name; if(args.label) writeLabel(it,args.label); return { success:true, ...meta(it), text:{excerpt:String(it.contents).slice(0,500), overset:safe(()=>it.overflows,false)} }; }
-        if (n === 'create_image_frame' || n === 'create_shape') { const p=at(doc.pages,args.pageIndex||0); const type=args.shapeType||'rectangle'; it=(type==='oval'?p.ovals:type==='polygon'?p.polygons:p.rectangles).add(); it.geometricBounds=args.bounds; if(args.name) it.name=args.name; if(args.label) writeLabel(it,args.label); return { success:true, ...meta(it) }; }
-        if (n === 'create_line') { const p=at(doc.pages,args.pageIndex||0); it=p.graphicLines.add(); it.paths.item(0).entirePath=[args.start,args.end]; if(args.name) it.name=args.name; if(args.label) writeLabel(it,args.label); return { success:true, ...meta(it) }; }
+        if (n === 'create_text_frame') { const p=at(doc.pages,args.pageIndex||0); it=p.textFrames.add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); it.contents=args.text||''; applyBasics(it,args); applyTextStyles(it,args); return { success:true, ...meta(it), unit:'pt', text:{excerpt:String(it.contents).slice(0,500), overset:safe(()=>it.overflows,false)} }; }
+        if (n === 'create_image_frame' || n === 'create_shape') { const p=at(doc.pages,args.pageIndex||0); const type=args.shapeType||'rectangle'; it=(type==='oval'?p.ovals:type==='polygon'?p.polygons:p.rectangles).add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); applyBasics(it,args); if(n==='create_image_frame' && args.imagePath){ it.place(args.imagePath, false); } return { success:true, ...meta(it), unit:'pt', link:safe(()=>({ name:it.graphics.item(0).itemLink.name, status:String(it.graphics.item(0).itemLink.status), path:it.graphics.item(0).itemLink.filePath }), null) }; }
+        if (n === 'create_line') { const p=at(doc.pages,args.pageIndex||0); it=p.graphicLines.add(); it.paths.item(0).entirePath=[[toPt(args.start[0],args.unit),toPt(args.start[1],args.unit)],[toPt(args.end[0],args.unit),toPt(args.end[1],args.unit)]]; applyBasics(it,args); return { success:true, ...meta(it), unit:'pt' }; }
         if (n === 'set_text_content') { it=resolveItem(args); it.contents=args.text||''; return { success:true, ...meta(it), text:{excerpt:String(it.contents).slice(0,500), overset:safe(()=>it.overflows,false)} }; }
-        if (n === 'set_bounds') { it=resolveItem(args); old=safe(()=>it.geometricBounds); it.geometricBounds=args.bounds; return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:safe(()=>it.geometricBounds) }; }
-        if (n === 'move_item' || n === 'resize_item') { it=resolveItem(args); old=safe(()=>it.geometricBounds); const b=old.slice(); if(args.delta){ b[0]+=args.delta[0]||0; b[1]+=args.delta[1]||0; b[2]+=args.delta[0]||0; b[3]+=args.delta[1]||0; } if(args.bounds) { b[0]=args.bounds[0]; b[1]=args.bounds[1]; b[2]=args.bounds[2]; b[3]=args.bounds[3]; } it.geometricBounds=b; return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:safe(()=>it.geometricBounds) }; }
+        if (n === 'set_bounds') { it=resolveItem(args); old=safe(()=>it.geometricBounds); it.geometricBounds=boundsInPt(args.bounds,args.unit); return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:safe(()=>it.geometricBounds), unit:'pt' }; }
+        if (n === 'move_item' || n === 'resize_item') { it=resolveItem(args); old=safe(()=>it.geometricBounds); const b=old.slice(); if(args.delta){ const dy=toPt(args.delta[0]||0,args.unit), dx=toPt(args.delta[1]||0,args.unit); b[0]+=dy; b[1]+=dx; b[2]+=dy; b[3]+=dx; } if(args.bounds) { const nb=boundsInPt(args.bounds,args.unit); b[0]=nb[0]; b[1]=nb[1]; b[2]=nb[2]; b[3]=nb[3]; } it.geometricBounds=boundsInPt(b,'pt'); return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:safe(()=>it.geometricBounds), unit:'pt' }; }
         if (n === 'rotate_item') { it=resolveItem(args); old=safe(()=>it.rotationAngle,0); it.rotationAngle=args.degrees||0; return { success:true, objectId:safe(()=>it.id), oldRotation:old, newRotation:safe(()=>it.rotationAngle) }; }
         if (n === 'lock_item' || n === 'unlock_item') { it=resolveItem(args); it.locked=n==='lock_item'; return { success:true, ...meta(it) }; }
-        if (n === 'rename_page_item') { it=resolveItem(args); old=safe(()=>it.name); it.name=args.name; return { success:true, objectId:safe(()=>it.id), oldName:old, name:safe(()=>it.name) }; }
+        if (n === 'rename_page_item') { it=resolveItem(args); old=safe(()=>it.name); it.name=cleanName(args.name); return { success:true, objectId:safe(()=>it.id), oldName:old, name:safe(()=>it.name) }; }
         if (n === 'label_object') { it=resolveItem(args); const label=args.merge===false?args.label:{...readLabel(it),...(args.label||{})}; writeLabel(it,label); return { success:true, objectId:safe(()=>it.id), label }; }
         if (n === 'get_object_label') { it=resolveItem(args); return { success:true, objectId:safe(()=>it.id), label:readLabel(it) }; }
-        if (n === 'find_objects_by_label' || n === 'list_named_objects') { const q=args.labelQuery||args; const hits=arr(doc.allPageItems||doc.pageItems,(x)=>({...meta(x),label:readLabel(x)})).filter(x=>Object.keys(q).every(k=>q[k]==null || x.label?.[k]===q[k])); return { success:true, objects:hits }; }
+        if (n === 'find_objects_by_label' || n === 'list_named_objects') { const q=args.labelQuery||args; const hits=arr(doc.allPageItems||doc.pageItems,(x)=>({...meta(x),label:readLabel(x)})).filter(x=>(args.includeHidden || x.visible!==false) && (!args.namePrefix || String(x.name||'').startsWith(args.namePrefix)) && Object.keys(q).every(k=>['labelQuery','includeHidden','namePrefix','pageIndex'].includes(k) || q[k]==null || x.label?.[k]===q[k])); return { success:true, objects:hits }; }
         if (n === 'bring_to_front' || n === 'send_to_back') { it=resolveItem(args); old=safe(()=>it.geometricBounds); if(n==='bring_to_front') it.bringToFront(); else it.sendToBack(); return { success:true, action:n, oldBounds:old, ...meta(it), warnings:['Docs-verified; pending live UXP validation'] }; }
         if (n === 'fit_content_to_frame' || n === 'fit_frame_to_content') { const { FitOptions } = require('indesign'); it=resolveItem(args); old=safe(()=>it.geometricBounds); const mode=n==='fit_content_to_frame'?FitOptions.CONTENT_TO_FRAME:FitOptions.FRAME_TO_CONTENT; it.fit(mode); return { success:true, action:n, fitMode:n==='fit_content_to_frame'?'CONTENT_TO_FRAME':'FRAME_TO_CONTENT', oldBounds:old, ...meta(it), warnings:['Docs-verified; pending live UXP validation'] }; }
         if (n === 'apply_swatches') { it=resolveItem(args); const applied={}, warnings=[]; if(args.fillSwatch){ it.fillColor=named(doc.swatches,args.fillSwatch,'Swatch'); applied.fillSwatch=args.fillSwatch; } if(args.strokeSwatch){ it.strokeColor=named(doc.swatches,args.strokeSwatch,'Swatch'); applied.strokeSwatch=args.strokeSwatch; } if(args.strokeWeight!=null){ it.strokeWeight=args.strokeWeight; applied.strokeWeight=args.strokeWeight; } const text=safe(()=>it.texts.item(0)); if(text && text.isValid!==false){ if(args.textFillSwatch){ text.fillColor=named(doc.swatches,args.textFillSwatch,'Swatch'); applied.textFillSwatch=args.textFillSwatch; } if(args.textStrokeSwatch){ text.strokeColor=named(doc.swatches,args.textStrokeSwatch,'Swatch'); applied.textStrokeSwatch=args.textStrokeSwatch; } } else if(args.textFillSwatch || args.textStrokeSwatch) warnings.push('Text swatch requested but object has no text content'); return { success:true, action:n, applied, ...meta(it), warnings }; }
@@ -327,7 +373,7 @@ function layoutAndLabels(name) {
         if (n === 'ungroup_items') { it=resolveItem(args); const kids=arr(it.allPageItems||[], x=>safe(()=>x.id)); it.ungroup(); return { success:true, action:n, objectId:args.objectId||null, childIds:kids, warnings:['Pending live UXP validation'] }; }
         if (n === 'align_items') { const { AlignOptions, AlignDistributeBounds } = require('indesign'); const items=resolveItems(args); const before=items.map(x=>({objectId:safe(()=>x.id), bounds:safe(()=>x.geometricBounds)})); const alignMap={left:'LEFT_EDGES',right:'RIGHT_EDGES',top:'TOP_EDGES',bottom:'BOTTOM_EDGES',centerX:'HORIZONTAL_CENTERS',centerY:'VERTICAL_CENTERS'}; const boundsMap={page:'PAGE_BOUNDS',spread:'SPREAD_BOUNDS',selection:'ITEM_BOUNDS',items:'ITEM_BOUNDS',referenceObject:'KEY_OBJECT'}; const opt=AlignOptions[alignMap[args.mode]||args.mode]; const bound=AlignDistributeBounds[boundsMap[args.alignTo]||args.bounds||'ITEM_BOUNDS']; const ref=args.referenceObjectId?itemById(args.referenceObjectId):undefined; doc.align(items,opt,bound,ref); return { success:true, action:n, mode:args.mode, alignTo:args.alignTo||'items', before, after:items.map(x=>({objectId:safe(()=>x.id), bounds:safe(()=>x.geometricBounds)})), warnings:['Native align args are pending live UXP validation'] }; }
         if (n === 'distribute_items') { const { DistributeOptions, AlignDistributeBounds } = require('indesign'); const items=resolveItems(args); const before=items.map(x=>({objectId:safe(()=>x.id), bounds:safe(()=>x.geometricBounds)})); const distMap={horizontal:'HORIZONTAL_SPACE',vertical:'VERTICAL_SPACE',left:'LEFT_EDGES',right:'RIGHT_EDGES',top:'TOP_EDGES',bottom:'BOTTOM_EDGES',centerX:'HORIZONTAL_CENTERS',centerY:'VERTICAL_CENTERS'}; const boundsMap={page:'PAGE_BOUNDS',spread:'SPREAD_BOUNDS',selection:'ITEM_BOUNDS',items:'ITEM_BOUNDS'}; const opt=DistributeOptions[distMap[args.axis]||args.mode||args.axis]; const bound=AlignDistributeBounds[boundsMap[args.within]||args.bounds||'ITEM_BOUNDS']; doc.distribute(items,opt,bound,args.fixedSpacing!=null,args.fixedSpacing||0); return { success:true, action:n, axis:args.axis, before, after:items.map(x=>({objectId:safe(()=>x.id), bounds:safe(()=>x.geometricBounds)})), warnings:['Native distribute args are pending live UXP validation'] }; }
-        if (n === 'create_reference_underlay' || n === 'hide_reference_underlay' || n === 'remove_reference_underlay') return { success:false, error:n+' is registered for template generation but not implemented yet; live UXP refinement is required before it can edit the working copy.' };
+        if (n === 'create_reference_underlay' || n === 'hide_reference_underlay' || n === 'remove_reference_underlay') return { success:false, error:n+' should have been handled before generic template dispatch.' };
         return { success:false, error:'Template tool not implemented: '+n };
     `;
 }

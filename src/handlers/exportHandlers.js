@@ -1,61 +1,21 @@
 /**
  * Export handlers
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { ScriptExecutor } from '../core/scriptExecutor.js';
 import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
 
 export class ExportHandlers {
-    static pathHelper = `
-            function normalizeFileTarget(targetPath) {
-                try {
-                    const file = targetPath instanceof File ? targetPath : new File(String(targetPath));
-                    return { success: true, file };
-                } catch (e) {
-                    return { success: false, error: 'Invalid file path: ' + e.message };
-                }
-            }
+    static ensureDirForFile(filePath) {
+        if (!filePath) throw new Error('filePath is required');
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    }
 
-            function normalizeFolderTarget(targetPath) {
-                try {
-                    const folder = targetPath instanceof Folder ? targetPath : new Folder(String(targetPath));
-                    return { success: true, folder };
-                } catch (e) {
-                    return { success: false, error: 'Invalid directory path: ' + e.message };
-                }
-            }
-
-            function ensureFolderExists(folder) {
-                if (!folder) return { success: false, error: 'No directory target provided' };
-                try {
-                    if (folder.exists) return { success: true, folder };
-                    const parent = folder.parent;
-                    if (parent && parent !== folder && !parent.exists) {
-                        const parentResult = ensureFolderExists(parent);
-                        if (!parentResult.success) return parentResult;
-                    }
-                    if (!folder.create() && !folder.exists) {
-                        return { success: false, error: 'Failed to create directory: ' + folder.fsName };
-                    }
-                    return { success: true, folder };
-                } catch (e) {
-                    return { success: false, error: 'Failed to create directory: ' + folder.fsName + ' (' + e.message + ')' };
-                }
-            }
-
-            function prepareFileTarget(targetPath) {
-                const fileResult = normalizeFileTarget(targetPath);
-                if (!fileResult.success) return { success: false, error: fileResult.error };
-                const parentResult = ensureFolderExists(fileResult.file.parent);
-                if (!parentResult.success) return { success: false, error: parentResult.error };
-                return { success: true, file: fileResult.file };
-            }
-
-            function prepareFolderTarget(targetPath) {
-                const folderResult = normalizeFolderTarget(targetPath);
-                if (!folderResult.success) return { success: false, error: folderResult.error };
-                return ensureFolderExists(folderResult.folder);
-            }
-        `;
+    static ensureDir(dirPath) {
+        if (!dirPath) throw new Error('outputPath is required');
+        fs.mkdirSync(dirPath, { recursive: true });
+    }
 
     /**
      * Export document to PDF
@@ -66,19 +26,16 @@ export class ExportHandlers {
             preset = 'High Quality Print',
         } = args;
 
+        try { this.ensureDirForFile(filePath); } catch (error) { return formatErrorResponse(error.message, "Export PDF"); }
+
         const code = `
             const { ExportFormat } = require('indesign');
-            ${ExportHandlers.pathHelper}
             if (app.documents.length === 0) {
                 return { success: false, error: 'No document open' };
             }
             const doc = app.activeDocument;
             try {
-                const target = prepareFileTarget(${JSON.stringify(filePath)});
-                if (!target.success) {
-                    return { success: false, error: 'Failed to prepare export path: ' + target.error };
-                }
-                await doc.exportFile(ExportFormat.pdfType, target.file, false, ${JSON.stringify(preset)});
+                await doc.exportFile(ExportFormat.pdfType, ${JSON.stringify(filePath)}, false, ${JSON.stringify(preset)});
                 return { success: true, message: 'PDF exported to ' + ${JSON.stringify(filePath)} };
             } catch(e) {
                 return { success: false, error: 'Export failed: ' + e.message };
@@ -124,8 +81,9 @@ export class ExportHandlers {
             }
         }
 
+        try { this.ensureDir(targetFolder); } catch (error) { return formatErrorResponse(error.message, "Export Images"); }
+
         const code = `
-            ${ExportHandlers.pathHelper}
             if (app.documents.length === 0) {
                 return { success: false, error: 'No document open' };
             }
@@ -133,10 +91,6 @@ export class ExportHandlers {
             const folderPath = ${JSON.stringify(targetFolder)};
 
             try {
-                const folderResult = prepareFolderTarget(folderPath);
-                if (!folderResult.success) {
-                    return { success: false, error: 'Failed to prepare export directory: ' + folderResult.error };
-                }
                 const formatStr = ${JSON.stringify(format)};
                 let exportFormat;
                 if (formatStr === 'JPEG') {
@@ -171,25 +125,17 @@ export class ExportHandlers {
                     for (let i = 0; i < pages.length; i++) {
                         const pageNum = parseInt(pages[i]) - 1;
                         if (pageNum >= 0 && pageNum < doc.pages.length) {
-                            const fileName = folderResult.folder.fsName + '/page_' + (pageNum + 1) + '.' + ext;
+                            const fileName = folderPath + '/page_' + (pageNum + 1) + '.' + ext;
                             configureExport(pageNum + 1);
-                            const target = prepareFileTarget(fileName);
-                            if (!target.success) {
-                                return { success: false, error: 'Failed to prepare image export path: ' + target.error };
-                            }
-                            await doc.exportFile(exportFormat, target.file, false);
+                            await doc.exportFile(exportFormat, fileName, false);
                             exportedCount++;
                         }
                     }
                 } else {
                     for (let i = 0; i < doc.pages.length; i++) {
-                        const fileName = folderResult.folder.fsName + '/page_' + (i + 1) + '.' + ext;
+                        const fileName = folderPath + '/page_' + (i + 1) + '.' + ext;
                         configureExport(i + 1);
-                        const target = prepareFileTarget(fileName);
-                        if (!target.success) {
-                            return { success: false, error: 'Failed to prepare image export path: ' + target.error };
-                        }
-                        await doc.exportFile(exportFormat, target.file, false);
+                        await doc.exportFile(exportFormat, fileName, false);
                         exportedCount++;
                     }
                 }
@@ -213,35 +159,27 @@ export class ExportHandlers {
         const { outputPath, folderPath, includeFonts = true, includeLinks = true, includeProfiles = true } = args;
         const targetFolder = outputPath || folderPath;
 
+        try { this.ensureDir(targetFolder); } catch (error) { return formatErrorResponse(error.message, "Package Document"); }
+
         const code = `
-            ${ExportHandlers.pathHelper}
             if (app.documents.length === 0) {
                 return { success: false, error: 'No document open' };
             }
             const doc = app.activeDocument;
 
             try {
-                const folderResult = prepareFolderTarget(${JSON.stringify(targetFolder)});
-                if (!folderResult.success) {
-                    return { success: false, error: 'Failed to prepare package directory: ' + folderResult.error };
+                const args = [
+                    ${includeFonts}, ${includeLinks}, ${includeProfiles},
+                    false, false, true, true, false, false, '', false, '', false
+                ];
+                try {
+                    doc.packageForPrint(${JSON.stringify(targetFolder)}, ...args);
+                } catch (firstError) {
+                    const { localFileSystem } = require('uxp').storage;
+                    const folderUrl = 'file:' + ${JSON.stringify(targetFolder)};
+                    const folder = await localFileSystem.getEntryWithUrl(folderUrl);
+                    doc.packageForPrint(folder, ...args);
                 }
-
-                doc.packageForPrint(
-                    folderResult.folder,
-                    ${includeFonts},
-                    ${includeLinks},
-                    ${includeProfiles},
-                    false,
-                    false,
-                    true,
-                    true,
-                    false,
-                    false,
-                    '',
-                    false,
-                    '',
-                    false
-                );
                 return { success: true };
             } catch(e) {
                 return { success: false, error: 'Error packaging document: ' + e.message };

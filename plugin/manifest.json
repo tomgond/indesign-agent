@@ -19,6 +19,7 @@
     "network": {
       "domains": "all"
     },
+    "localFileSystem": "fullAccess",
     "allowCodeGenerationFromStrings": true
   }
 }

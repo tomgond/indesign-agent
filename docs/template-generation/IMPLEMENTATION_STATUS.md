@@ -98,6 +98,17 @@ Known risks in this group:
 
 No registered template-generation tools intentionally return not-implemented after the extended-capabilities pass. Most InDesign DOM-dependent tools are still only docs-verified until the live Mac/InDesign pass.
 
+## June 21 fix batch pending deployment
+
+- Export/package handlers no longer use ExtendScript-style `new File` / `new Folder`; Node prepares folders and UXP receives plain Mac path strings, with a UXP storage fallback for packaging.
+- The UXP plugin manifest now requests `localFileSystem: fullAccess` for package fallback and file-system entry access.
+- Group add/remove now accepts stable `groupId` / `itemId` and avoids flattened `allPageItems` child-index confusion by falling back to the single standalone page item when legacy index calls hit an existing group child.
+- Template active-document guard now normalizes UXP file entries through `nativePath` / `fsName`.
+- Preview export validates page/spread indexes and sets image export page ranges/resolution where available.
+- Template layout tools now do basic positive-bounds validation, `mm` to `pt` conversion, create-time style/swatch basics, optional image placement for `create_image_frame`, semantic name rejection for unsafe characters, and the documented `REFERENCE_UNDERLAY` default layer name.
+
+Still pending: live Mac/InDesign retest after deployment and deeper fixture-driven completion of every optional inspection/preflight field.
+
 ## What it takes to finish
 
 1. Use Adobe InDesign UXP DOM docs to map each incomplete tool to exact APIs and enum names.

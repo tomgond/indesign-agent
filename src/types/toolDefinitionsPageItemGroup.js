@@ -287,12 +287,20 @@ export const pageItemGroupToolDefinitions = [
                     type: 'integer',
                     description: 'Index of the group to add the item to'
                 },
+                groupId: {
+                    type: 'integer',
+                    description: 'Stable group object ID; preferred when available'
+                },
                 itemIndex: {
                     type: 'integer',
                     description: 'Index of the page item to add to the group'
+                },
+                itemId: {
+                    type: 'integer',
+                    description: 'Stable page item object ID; preferred when available'
                 }
             },
-            required: ['pageIndex', 'groupIndex', 'itemIndex']
+            required: ['pageIndex']
         }
     },
     {
@@ -309,12 +317,16 @@ export const pageItemGroupToolDefinitions = [
                     type: 'integer',
                     description: 'Index of the group to remove the item from'
                 },
+                groupId: {
+                    type: 'integer',
+                    description: 'Stable group object ID; preferred when available'
+                },
                 itemIndex: {
                     type: 'integer',
                     description: 'Index of the item within the group to remove'
                 }
             },
-            required: ['pageIndex', 'groupIndex', 'itemIndex']
+            required: ['pageIndex', 'itemIndex']
         }
     },
     {

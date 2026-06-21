@@ -24,15 +24,15 @@ export const templateToolDefinitions = names.map((name) => ({
         properties: {
             originalInddPath: { type: 'string' }, workspaceRoot: { type: 'string' }, overwriteExistingWorkspace: { type: 'boolean' },
             path: { type: 'string' }, kind: { type: 'string' }, versionId: { type: 'string' }, label: {}, derivativeId: { type: 'string' },
-            pageIndex: { type: 'number' }, spreadIndex: { type: 'number' }, objectId: { type: 'number' }, objectIds: { type: 'array', items: { type: 'number' } }, name: { type: 'string' }, bounds: { type: 'array' }, text: { type: 'string' },
+            pageIndex: { type: 'number' }, spreadIndex: { type: 'number' }, objectId: { type: 'number' }, objectIds: { type: 'array', items: { type: 'number' } }, groupId: { type: 'number' }, itemId: { type: 'number' }, name: { type: 'string' }, namePrefix: { type: 'string' }, bounds: { type: 'array' }, unit: { type: 'string', enum: ['pt', 'mm'] }, text: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' },
             shapeType: { type: 'string' }, start: { type: 'array' }, end: { type: 'array' }, delta: { type: 'array' }, degrees: { type: 'number' },
             imagePath: { type: 'string' }, filePath: { type: 'string' }, fitMode: { type: 'string' },
             paragraphStyle: { type: 'string' }, characterStyle: { type: 'string' }, objectStyle: { type: 'string' }, clearOverrides: { type: 'boolean' },
             fillSwatch: { type: 'string' }, strokeSwatch: { type: 'string' }, strokeWeight: { type: 'number' }, textFillSwatch: { type: 'string' }, textStrokeSwatch: { type: 'string' },
             mode: { type: 'string' }, alignTo: { type: 'string' }, axis: { type: 'string' }, within: { type: 'string' }, fixedSpacing: { type: 'number' }, referenceObjectId: { type: 'number' },
             layerName: { type: 'string' }, lockLayer: { type: 'boolean' }, removeLayer: { type: 'boolean' },
-            labelQuery: { type: 'object' }, merge: { type: 'boolean' }, targetPreviewId: { type: 'string' }, indesignPreviewId: { type: 'string' }, brief: { type: 'string' }, issues: { type: 'array' }, suggestedFixes: { type: 'array' }, acceptedPreviewId: { type: 'string' }, notes: { type: 'string' }, limit: { type: 'number' },
-            outputName: { type: 'string' }, format: { type: 'string', enum: ['png', 'jpg'] }, overwrite: { type: 'boolean' }, previewId: { type: 'string' }
+            labelQuery: { type: 'object' }, merge: { type: 'boolean' }, includeHidden: { type: 'boolean' }, targetPreviewId: { type: 'string' }, indesignPreviewId: { type: 'string' }, brief: { type: 'string' }, issues: { type: 'array' }, suggestedFixes: { type: 'array' }, acceptedPreviewId: { type: 'string' }, notes: { type: 'string' }, limit: { type: 'number' },
+            outputName: { type: 'string' }, format: { type: 'string', enum: ['png', 'jpg'] }, resolution: { type: 'number' }, transparentBackground: { type: 'boolean' }, overwrite: { type: 'boolean' }, previewId: { type: 'string' }
         }
     }
 }));

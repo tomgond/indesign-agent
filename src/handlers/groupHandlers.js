@@ -44,6 +44,49 @@ export class GroupHandlers {
                 }
                 return children;
             }
+
+            function itemId(item) {
+                try { return item && item.id; } catch(e) { return null; }
+            }
+
+            function findById(collection, id) {
+                if (id === undefined || id === null) return null;
+                for (let i = 0; i < collection.length; i++) {
+                    const item = collectionItem(collection, i);
+                    if (itemId(item) === id) return item;
+                }
+                return null;
+            }
+
+            function directPageItems(page) {
+                const out = [];
+                const source = page.pageItems || page.allPageItems;
+                for (let i = 0; source && i < source.length; i++) {
+                    const item = collectionItem(source, i);
+                    if (item) out.push(item);
+                }
+                return out;
+            }
+
+            function childIdSet(group) {
+                const ids = {};
+                const children = getGroupChildren(group);
+                for (let i = 0; i < children.length; i++) ids[itemId(children[i])] = true;
+                return ids;
+            }
+
+            function findStandaloneCandidate(page, group) {
+                const childIds = childIdSet(group);
+                const items = directPageItems(page);
+                const candidates = [];
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    const id = itemId(item);
+                    if (!item || id === itemId(group) || childIds[id] || isGroupItem(item)) continue;
+                    candidates.push(item);
+                }
+                return candidates.length === 1 ? candidates[0] : null;
+            }
         `;
 
     /**
@@ -210,7 +253,7 @@ export class GroupHandlers {
      * Add item to group
      */
     static async addItemToGroup(args) {
-        const { pageIndex, groupIndex, itemIndex } = args;
+        const { pageIndex, groupIndex = -1, itemIndex = -1 } = args;
 
         const code = `
             ${GroupHandlers.collectionHelper}
@@ -219,11 +262,22 @@ export class GroupHandlers {
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
-            if (${groupIndex} < 0 || ${groupIndex} >= page.allPageItems.length) return { success: false, error: 'Group index out of range' };
-            const group = collectionItem(page.allPageItems, ${groupIndex});
+            let group = null;
+            if (${JSON.stringify(args.groupId)} !== undefined && ${JSON.stringify(args.groupId)} !== null) {
+                group = findById(page.allPageItems, ${JSON.stringify(args.groupId)});
+            }
+            if (!group) {
+                if (${groupIndex} < 0 || ${groupIndex} >= page.allPageItems.length) return { success: false, error: 'Group index out of range' };
+                group = collectionItem(page.allPageItems, ${groupIndex});
+            }
             if (!isGroupItem(group)) return { success: false, error: 'Selected item is not a group' };
-            if (${itemIndex} < 0 || ${itemIndex} >= page.allPageItems.length) return { success: false, error: 'Item index out of range' };
-            const item = collectionItem(page.allPageItems, ${itemIndex});
+            let item = null;
+            if (${JSON.stringify(args.itemId)} !== undefined && ${JSON.stringify(args.itemId)} !== null) {
+                item = findById(page.allPageItems, ${JSON.stringify(args.itemId)});
+            }
+            if (!item && ${itemIndex} >= 0 && ${itemIndex} < page.allPageItems.length) {
+                item = collectionItem(page.allPageItems, ${itemIndex});
+            }
             if (!item) return { success: false, error: 'Target item not found' };
             if (item.id === group.id) return { success: false, error: 'Cannot add a group to itself' };
 
@@ -234,7 +288,10 @@ export class GroupHandlers {
 
             for (let i = 0; i < children.length; i++) {
                 if (children[i] && children[i].id === item.id) {
-                    return { success: true, groupId: group.id, itemId: item.id, alreadyMember: true };
+                    const fallback = findStandaloneCandidate(page, group);
+                    if (!fallback) return { success: true, groupId: group.id, itemId: item.id, alreadyMember: true };
+                    item = fallback;
+                    break;
                 }
             }
 
@@ -246,7 +303,7 @@ export class GroupHandlers {
                 newGroup.name = originalName;
                 newGroup.visible = originalVisible;
                 newGroup.locked = originalLocked;
-                return { success: true, groupId: newGroup.id, itemId: item.id };
+                return { success: true, groupId: newGroup.id, itemId: item.id, itemCount: getGroupChildren(newGroup).length };
             } catch(e) {
                 return { success: false, error: 'Failed to add item to group: ' + e.message };
             }
@@ -262,7 +319,7 @@ export class GroupHandlers {
      * Remove item from group
      */
     static async removeItemFromGroup(args) {
-        const { pageIndex, groupIndex, itemIndex } = args;
+        const { pageIndex, groupIndex = -1, itemIndex } = args;
 
         const code = `
             ${GroupHandlers.collectionHelper}
@@ -271,8 +328,14 @@ export class GroupHandlers {
             const doc = app.activeDocument;
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
-            if (${groupIndex} < 0 || ${groupIndex} >= page.allPageItems.length) return { success: false, error: 'Group index out of range' };
-            const group = collectionItem(page.allPageItems, ${groupIndex});
+            let group = null;
+            if (${JSON.stringify(args.groupId)} !== undefined && ${JSON.stringify(args.groupId)} !== null) {
+                group = findById(page.allPageItems, ${JSON.stringify(args.groupId)});
+            }
+            if (!group) {
+                if (${groupIndex} < 0 || ${groupIndex} >= page.allPageItems.length) return { success: false, error: 'Group index out of range' };
+                group = collectionItem(page.allPageItems, ${groupIndex});
+            }
             if (!isGroupItem(group)) return { success: false, error: 'Selected item is not a group' };
             const groupItems = getGroupChildren(group);
             if (${itemIndex} < 0 || ${itemIndex} >= groupItems.length) return { success: false, error: 'Item index out of range in group' };
