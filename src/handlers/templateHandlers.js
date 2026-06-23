@@ -86,7 +86,9 @@ function activeGuardCode(body) {
         const doc = app.activeDocument;
         let activePath = '';
         function nativePath(v) { try { return v ? String(v.nativePath || v.fsName || v) : ''; } catch(e) { return ''; } }
-        try { activePath = nativePath(await doc.filePath) || nativePath(await doc.fullName); } catch(e) {}
+        function joinDocPath(basePath, docName) { const base = String(basePath || '').replace(/[\\/]+$/, ''); if (!base) return ''; const sep = base.indexOf('\\') >= 0 ? '\\' : '/'; return base + sep + docName; }
+        function normalizeDocPath(rawPath, docName) { const base = nativePath(rawPath); const name = String(docName || ''); if (!base) return ''; if (name && !/\.indd$/i.test(base)) return joinDocPath(base, name); return base; }
+        try { activePath = normalizeDocPath(await doc.filePath, doc.name) || normalizeDocPath(await doc.fullName, doc.name); } catch(e) {}
         if (!activePath || activePath !== expected) return { success:false, error:'Active document is not workspace working copy', activeDocumentPath: activePath || null, workingCopyPath: expected };
         ${body}
     `;
@@ -244,10 +246,12 @@ export class TemplateHandlers {
         return ScriptExecutor.executeViaUXP(`
             const expected = ${q(path.resolve(m.workingCopyPath))};
             let activeDocumentPath = null;
-            try { if (app.documents.length) activeDocumentPath = String(await app.activeDocument.filePath || app.activeDocument.fullName || ''); } catch(e) {}
+            function nativePath(v) { try { return v ? String(v.nativePath || v.fsName || v) : ''; } catch(e) { return ''; } }
+            function joinDocPath(basePath, docName) { const base = String(basePath || '').replace(/[\\/]+$/, ''); if (!base) return ''; const sep = base.indexOf('\\') >= 0 ? '\\' : '/'; return base + sep + docName; }
+            function normalizeDocPath(rawPath, docName) { const base = nativePath(rawPath); const name = String(docName || ''); if (!base) return ''; if (name && !/\.indd$/i.test(base)) return joinDocPath(base, name); return base; }
             try {
-                const fp = app.documents.length ? (await app.activeDocument.filePath || await app.activeDocument.fullName) : null;
-                activeDocumentPath = fp ? String(fp.nativePath || fp.fsName || fp) : activeDocumentPath;
+                const doc = app.documents.length ? app.activeDocument : null;
+                activeDocumentPath = doc ? (normalizeDocPath(await doc.filePath, doc.name) || normalizeDocPath(await doc.fullName, doc.name) || null) : null;
             } catch(e) {}
             return { ok: activeDocumentPath === expected, activeDocumentPath, workingCopyPath: expected };
         `);
