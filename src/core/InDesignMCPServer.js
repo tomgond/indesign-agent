@@ -26,7 +26,7 @@ import { getWorkspace } from './workspaceState.js';
 import { assertWorkspacePath } from '../utils/pathGuard.js';
 
 const TEMPLATE_TOOL_NAMES = new Set([
-    'init_template_workspace','open_working_copy','get_workspace_status','save_working_copy','save_version','list_versions','rollback_to_version','validate_workspace_path','validate_active_document_is_working_copy',
+    'init_template_workspace','copy_original_to_workspace','open_working_copy','get_workspace_status','save_working_copy','save_version','list_versions','rollback_to_version','validate_workspace_path','validate_active_document_is_working_copy',
     'inspect_document_bundle','inspect_page_items_v2','inspect_styles','inspect_swatches','inspect_layers','inspect_parent_pages','export_page_preview','export_spread_preview','return_preview_as_image',
     'create_page','duplicate_page','create_text_frame','create_image_frame','create_shape','create_line','place_image','apply_styles','apply_swatches','set_text_content','set_bounds','move_item','resize_item','rotate_item','lock_item','unlock_item','group_items','ungroup_items','bring_to_front','send_to_back','align_items','distribute_items','fit_content_to_frame','fit_frame_to_content',
     'create_derivative_page','duplicate_items_to_page','create_text_slot','create_image_slot','fit_text_to_frame','export_derivative_preview','inspect_derivative','apply_layout_recipe','replace_image_in_frame','update_text_slot','move_resize_items','create_vector_motif','inspect_layout_grid','analyze_design_system','compare_derivative_state','run_derivative_checks',

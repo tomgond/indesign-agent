@@ -193,6 +193,38 @@ export class TemplateHandlers {
         return response(initWorkspace({ originalSourcePath: args.originalInddPath, workspaceRoot: args.workspaceRoot, overwriteExistingWorkspace: args.overwriteExistingWorkspace }), 'init_template_workspace');
     }
 
+    static copy_original_to_workspace(args = {}) {
+        return response((async () => {
+            if (args.originalInddPath && args.workspaceRoot) {
+                const manifest = initWorkspace({ originalSourcePath: args.originalInddPath, workspaceRoot: args.workspaceRoot, overwriteExistingWorkspace: args.overwriteExistingWorkspace });
+                return {
+                    success: true,
+                    workspaceRoot: manifest.workspaceRoot,
+                    inputCopyPath: path.join(manifest.workspaceRoot, 'input', 'base-copy.indd'),
+                    workingCopyPath: manifest.workingCopyPath,
+                    copied: true,
+                    verified: true
+                };
+            }
+            const manifest = loadWorkspace();
+            const inputCopyPath = path.join(manifest.workspaceRoot, 'input', 'base-copy.indd');
+            if (!fs.existsSync(manifest.workspaceRoot)) throw new Error('workspaceRoot does not exist');
+            if (!fs.existsSync(inputCopyPath)) throw new Error('Missing input/base-copy.indd');
+            if (!fs.existsSync(manifest.workingCopyPath)) throw new Error('Missing work/current.indd');
+            assertWorkspacePath(inputCopyPath, { kind: 'input', manifest });
+            assertWorkspacePath(manifest.workingCopyPath, { kind: 'work', manifest });
+            return {
+                success: true,
+                workspaceRoot: manifest.workspaceRoot,
+                inputCopyPath,
+                workingCopyPath: manifest.workingCopyPath,
+                copied: false,
+                verified: true,
+                originalSourcePath: manifest.originalSourcePath || null
+            };
+        })(), 'copy_original_to_workspace');
+    }
+
     static get_workspace_status() {
         return response((async () => {
             const m = loadWorkspace();
@@ -842,8 +874,10 @@ export class TemplateHandlers {
                 let layer = doc.layers.itemByName(layerName);
                 if (!layer || layer.isValid === false) layer = doc.layers.add({ name: layerName });
                 layer.visible = true; layer.locked = false; layer.printable = false;
-                const p = at(doc.pages, args.pageIndex || 0);
-                const rect = p.rectangles.add({ geometricBounds: args.bounds, itemLayer: layer });
+                if (args.pageIndex == null) throw new Error('pageIndex is required');
+                const p = pageByIndex(args.pageIndex);
+                const b = boundsInPt(args.bounds, args.unit || 'pt');
+                const rect = p.rectangles.add({ geometricBounds: b, itemLayer: layer });
                 rect.name = args.name || 'reference_underlay';
                 writeLabel(rect, { referenceOnly:true, source:'reference_underlay', ...(args.label||{}) });
                 rect.nonprinting = true;
@@ -925,11 +959,12 @@ export class TemplateHandlers {
     }
 
     static uxpTool(name, args) {
-        if (name === 'create_image_frame' && args.imagePath) {
+        if (name === 'create_image_frame' && (args.imagePath || args.filePath)) {
             const m = loadWorkspace();
+            const requestedPath = args.imagePath || args.filePath;
             const imagePath = (() => {
-                try { return assertWorkspacePath(args.imagePath, { kind: 'assets', manifest: m }).path; }
-                catch { return assertWorkspacePath(args.imagePath, { kind: 'input', manifest: m }).path; }
+                try { return assertWorkspacePath(requestedPath, { kind: 'assets', manifest: m }).path; }
+                catch { return assertWorkspacePath(requestedPath, { kind: 'input', manifest: m }).path; }
             })();
             args = { ...args, imagePath };
         }
@@ -1070,9 +1105,9 @@ function buildCreateObjectScript() {
             } catch (e) { try { p.remove(); } catch(_) {} throw e; }
         }
         if (n === 'duplicate_page') { const src=at(doc.pages,args.pageIndex||0); const p=src.duplicate(); return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null }; }
-        if (n === 'create_text_frame') { const p=at(doc.pages,args.pageIndex||0); it=p.textFrames.add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); it.contents=args.text||args.content||''; applyBasics(it,args); applyTextStyles(it,args); return { success:true, ...meta(it), unit:'pt', text:textExcerpt(it) }; }
-        if (n === 'create_image_frame' || n === 'create_shape') { const p=at(doc.pages,args.pageIndex||0); const type=args.shapeType||'rectangle'; it=(type==='oval'?p.ovals:type==='polygon'?p.polygons:p.rectangles).add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); applyBasics(it,args); if(n==='create_image_frame' && args.imagePath){ it.place(args.imagePath, false); if (args.fitMode) applyFitMode(it, args.fitMode); } return { success:true, ...meta(it), unit:'pt', hasPlacedGraphic:!!linkInfo(it), link:linkInfo(it) }; }
-        if (n === 'create_line') { const p=at(doc.pages,args.pageIndex||0); it=p.graphicLines.add(); it.paths.item(0).entirePath=[[toPt(args.start[0],args.unit),toPt(args.start[1],args.unit)],[toPt(args.end[0],args.unit),toPt(args.end[1],args.unit)]]; applyBasics(it,args); return { success:true, ...meta(it), unit:'pt' }; }
+        if (n === 'create_text_frame') { if (args.pageIndex == null) throw new Error('pageIndex is required'); const p=pageByIndex(args.pageIndex); it=p.textFrames.add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); it.contents=args.text||args.content||''; applyBasics(it,args); applyTextStyles(it,args); return { success:true, ...meta(it), unit:'pt', text:textExcerpt(it) }; }
+        if (n === 'create_image_frame' || n === 'create_shape') { if (args.pageIndex == null) throw new Error('pageIndex is required'); const p=pageByIndex(args.pageIndex); const type=args.shapeType||'rectangle'; it=(type==='oval'?p.ovals:type==='polygon'?p.polygons:p.rectangles).add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); applyBasics(it,args); if(n==='create_image_frame' && args.imagePath){ it.place(args.imagePath, false); if (args.fitMode) applyFitMode(it, args.fitMode); } return { success:true, ...meta(it), unit:'pt', hasPlacedGraphic:!!linkInfo(it), link:linkInfo(it) }; }
+        if (n === 'create_line') { if (args.pageIndex == null) throw new Error('pageIndex is required'); const p=pageByIndex(args.pageIndex); it=p.graphicLines.add(); it.paths.item(0).entirePath=[[toPt(args.start[0],args.unit),toPt(args.start[1],args.unit)],[toPt(args.end[0],args.unit),toPt(args.end[1],args.unit)]]; applyBasics(it,args); return { success:true, ...meta(it), unit:'pt' }; }
     `;
 }
 
@@ -1080,10 +1115,11 @@ function buildGeometryScript() {
     return `
         if (n === 'set_text_content') { it=resolveItem(args); it.contents=args.text||''; return { success:true, ...meta(it), text:textExcerpt(it) }; }
         if (n === 'set_bounds') { it=resolveItem(args); old=clone(safe(()=>it.geometricBounds)); return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:setBoundsSmart(it, boundsInPt(args.bounds,args.unit), { preserveCenter:args.preserveCenter, preserveAspectRatio:args.preserveAspectRatio, anchor:args.anchor, roundTo:args.roundTo }), unit:'pt' }; }
-        if (n === 'move_item' || n === 'resize_item') { it=resolveItem(args); old=clone(safe(()=>it.geometricBounds)); const b=old.slice(); if(args.delta){ const dy=toPt(args.delta[0]||0,args.unit), dx=toPt(args.delta[1]||0,args.unit); b[0]+=dy; b[1]+=dx; b[2]+=dy; b[3]+=dx; } if(args.bounds) { const nb=boundsInPt(args.bounds,args.unit); b[0]=nb[0]; b[1]=nb[1]; b[2]=nb[2]; b[3]=nb[3]; } return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:setBoundsRaw(it, b), unit:'pt' }; }
+        if (n === 'move_item') { if(!args.delta) throw new Error('delta is required'); it=resolveItem(args); old=clone(safe(()=>it.geometricBounds)); const dy=toPt(args.delta[0]||0,args.unit), dx=toPt(args.delta[1]||0,args.unit); const b=[old[0]+dy, old[1]+dx, old[2]+dy, old[3]+dx]; return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:setBoundsRaw(it, b), unit:'pt' }; }
+        if (n === 'resize_item') { if(args.delta) throw new Error('resize_item does not accept delta; use move_item for delta moves'); if(!args.bounds) throw new Error('bounds are required'); it=resolveItem(args); old=clone(safe(()=>it.geometricBounds)); return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:setBoundsSmart(it, boundsInPt(args.bounds,args.unit||'pt'), { preserveCenter:args.preserveCenter, preserveAspectRatio:args.preserveAspectRatio, anchor:args.anchor, roundTo:args.roundTo }), unit:'pt', ...(args.returnBeforeAfter ? { before:old, after:clone(safe(()=>it.geometricBounds)) } : {}) }; }
         if (n === 'rotate_item') { it=resolveItem(args); old=safe(()=>it.rotationAngle,0); it.rotationAngle=args.degrees||0; return { success:true, objectId:safe(()=>it.id), oldRotation:old, newRotation:safe(()=>it.rotationAngle) }; }
         if (n === 'lock_item' || n === 'unlock_item') { it=resolveItem(args); it.locked=n==='lock_item'; return { success:true, ...meta(it) }; }
-        if (n === 'rename_page_item') { it=resolveItem(args); old=safe(()=>it.name); it.name=cleanName(args.name); return { success:true, objectId:safe(()=>it.id), oldName:old, name:safe(()=>it.name) }; }
+        if (n === 'rename_page_item') { if (!args.newName) throw new Error('newName is required'); it=resolveItem(args); old=safe(()=>it.name); it.name=cleanName(args.newName); return { success:true, objectId:safe(()=>it.id), oldName:old, newName:safe(()=>it.name), name:safe(()=>it.name) }; }
     `;
 }
 
@@ -1102,7 +1138,7 @@ function buildLabelScript() {
     return `
         if (n === 'label_object') { it=resolveItem(args); const label=args.merge===false?args.label:{...readLabel(it),...(args.label||{})}; writeLabel(it,label); return { success:true, objectId:safe(()=>it.id), label }; }
         if (n === 'get_object_label') { it=resolveItem(args); return { success:true, objectId:safe(()=>it.id), label:readLabel(it) }; }
-        if (n === 'find_objects_by_label' || n === 'list_named_objects') { const query=args.labelQuery||args; const hits=arr(doc.allPageItems||doc.pageItems,(x)=>({...meta(x),label:readLabel(x)})).filter(x=>(args.includeHidden || x.visible!==false) && (!args.namePrefix || String(x.name||'').startsWith(args.namePrefix)) && Object.keys(query).every(k=>['labelQuery','includeHidden','namePrefix','pageIndex'].includes(k) || query[k]==null || x.label?.[k]===query[k])); return { success:true, objects:hits }; }
+        if (n === 'find_objects_by_label' || n === 'list_named_objects') { const query=args.labelQuery||null; const hits=arr(doc.allPageItems||doc.pageItems,(x)=>({ ...itemSnapshot(x), visible:safe(()=>x.visible,true) })).filter(x=>(args.includeHidden || x.visible!==false) && (!args.namePrefix || String(x.name||'').startsWith(args.namePrefix)) && (args.pageIndex == null || x.pageIndex === args.pageIndex) && (!query || labelMatches(x.label, query))); return { success:true, objects:hits }; }
     `;
 }
 

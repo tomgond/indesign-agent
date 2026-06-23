@@ -41,4 +41,4 @@ export { pageItemGroupToolDefinitions } from './toolDefinitionsPageItemGroup.js'
 export { masterSpreadToolDefinitions } from './toolDefinitionsMasterSpread.js';
 export { spreadToolDefinitions } from './toolDefinitionsSpread.js';
 export { layerToolDefinitions } from './toolDefinitionsLayer.js'; 
-export { templateToolDefinitions } from './toolDefinitionsTemplate.js';
+export { templateToolDefinitions, templateToolProfileNames } from './toolDefinitionsTemplate.js';
