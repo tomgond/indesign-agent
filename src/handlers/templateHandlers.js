@@ -267,8 +267,26 @@ export class TemplateHandlers {
             assertWorkspacePath(m.workingCopyPath, { kind: 'work', manifest: m });
             return ScriptExecutor.executeViaUXP(`
                 const filePath = ${q(m.workingCopyPath)};
+                const expected = String(filePath).replace(/\\/g, '/');
+                function nativePath(v) { try { return v ? String(v.nativePath || v.fsName || v) : ''; } catch(e) { return ''; } }
+                function joinDocPath(basePath, docName) { const base = String(basePath || '').replace(/[\\/]+$/, ''); if (!base) return ''; return base + '/' + docName; }
+                function normalizeDocPath(rawPath, docName) {
+                    const base = nativePath(rawPath).replace(/\\/g, '/');
+                    const name = String(docName || '');
+                    if (!base) return '';
+                    if (name && !/\.indd$/i.test(base)) return joinDocPath(base, name);
+                    return base;
+                }
+                for (let i = 0; i < app.documents.length; i++) {
+                    const existing = app.documents[i];
+                    const existingPath = normalizeDocPath(await existing.filePath, existing.name) || normalizeDocPath(await existing.fullName, existing.name);
+                    if (existingPath === expected) {
+                        app.activeDocument = existing;
+                        return { success:true, documentName: existing.name, path: filePath, reusedOpenDocument: true };
+                    }
+                }
                 const doc = await app.open(filePath);
-                return { success:true, documentName: doc.name, path: filePath };
+                return { success:true, documentName: doc.name, path: filePath, reusedOpenDocument: false };
             `);
         })(), 'open_working_copy');
     }
