@@ -70,3 +70,25 @@ export function upsertDerivative(manifest, derivativeId, patch) {
     saveWorkspace(manifest);
     return record;
 }
+
+export function upsertDerivativePage(manifest, derivativeId, patch = {}) {
+    if (!derivativeId) return null;
+    const now = new Date().toISOString();
+    const existing = (manifest.derivatives || []).find((record) => record.derivativeId === derivativeId) || {};
+    return upsertDerivative(manifest, derivativeId, {
+        derivativeId,
+        pageIndex: patch.pageIndex ?? existing.pageIndex ?? null,
+        name: patch.name ?? existing.name ?? null,
+        format: patch.format ?? patch.pageSize?.preset ?? patch.pageSize?.name ?? existing.format ?? null,
+        pageSize: patch.pageSize ?? existing.pageSize ?? null,
+        basePageIndex: patch.basePageIndex ?? existing.basePageIndex ?? null,
+        status: patch.status ?? existing.status ?? 'draft',
+        latestPreviewId: patch.latestPreviewId ?? existing.latestPreviewId ?? null,
+        previewIds: patch.previewIds ?? existing.previewIds ?? [],
+        versionIds: patch.versionIds ?? existing.versionIds ?? [],
+        checkHistory: patch.checkHistory ?? existing.checkHistory ?? [],
+        inspectionIds: patch.inspectionIds ?? existing.inspectionIds ?? [],
+        createdAt: existing.createdAt ?? patch.createdAt ?? now,
+        ...patch
+    });
+}

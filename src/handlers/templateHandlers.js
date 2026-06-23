@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ScriptExecutor } from '../core/scriptExecutor.js';
 import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
-import { initWorkspace, loadWorkspace, getWorkspace, saveWorkspace, nextVersionId, upsertDerivative } from '../core/workspaceState.js';
+import { initWorkspace, loadWorkspace, getWorkspace, saveWorkspace, nextVersionId, upsertDerivative, upsertDerivativePage } from '../core/workspaceState.js';
 import { assertWorkspacePath, safeBasename } from '../utils/pathGuard.js';
 import { imageInfo } from '../utils/imageInfo.js';
 
@@ -13,6 +13,70 @@ function response(promise, op) {
 }
 
 function q(value) { return JSON.stringify(value); }
+
+function nowIso() { return new Date().toISOString(); }
+
+function toPtNumber(value, unit = 'pt') {
+    const num = Number(value);
+    if (!Number.isFinite(num)) throw new Error('Expected finite number');
+    return unit === 'mm' ? num * 2.8346456693 : num;
+}
+
+function boundsToPt(bounds, unit = 'pt') {
+    if (!Array.isArray(bounds) || bounds.length !== 4) throw new Error('bounds must be [top,left,bottom,right]');
+    const out = bounds.map((value) => toPtNumber(value, unit));
+    if (out[2] <= out[0] || out[3] <= out[1]) throw new Error('bounds must have positive width and height');
+    return out;
+}
+
+function pagePresetSize(name) {
+    const key = String(name || '').toLowerCase();
+    if (key === 'a5') return { width: 148, height: 210, unit: 'mm', preset: 'A5' };
+    if (key === 'a3') return { width: 297, height: 420, unit: 'mm', preset: 'A3' };
+    if (key === 'social_square') return { width: 1080, height: 1080, unit: 'pt', preset: 'social_square' };
+    return null;
+}
+
+function derivativePageSize(args = {}) {
+    const preset = pagePresetSize(args.pageSize);
+    let width = args.width;
+    let height = args.height;
+    let unit = args.unit || 'pt';
+    if (preset) {
+        width = preset.width;
+        height = preset.height;
+        unit = preset.unit;
+    }
+    if (width == null || height == null) {
+        if (args.pageSize === 'poster' || args.pageSize === 'banner') throw new Error('poster/banner require width and height');
+        throw new Error('page size requires width and height or a supported preset');
+    }
+    let widthPt = toPtNumber(width, unit);
+    let heightPt = toPtNumber(height, unit);
+    if (args.orientation === 'landscape' && heightPt > widthPt) [widthPt, heightPt] = [heightPt, widthPt];
+    if (args.orientation === 'portrait' && widthPt > heightPt) [widthPt, heightPt] = [heightPt, widthPt];
+    if (widthPt <= 0 || heightPt <= 0) throw new Error('page width and height must be positive');
+    return { width: widthPt, height: heightPt, unit: 'pt', preset: args.pageSize || preset?.preset || 'custom' };
+}
+
+function resolveWorkspaceImagePath(requestedPath, manifest = loadWorkspace()) {
+    if (!requestedPath) throw new Error('imagePath is required');
+    try { return assertWorkspacePath(requestedPath, { kind: 'assets', manifest }).path; }
+    catch { return assertWorkspacePath(requestedPath, { kind: 'input', manifest }).path; }
+}
+
+function ensureJsonlArray(filePath) {
+    if (!fs.existsSync(filePath)) return [];
+    return fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+}
+
+function appendJsonl(filePath, record) {
+    fs.appendFileSync(filePath, `${JSON.stringify(record)}\n`);
+}
+
+function shallowMergeLabel(base, patch) {
+    return { ...(base || {}), ...(patch || {}) };
+}
 
 function activeGuardCode(body) {
     const { workingCopyPath } = getWorkspace();
@@ -41,9 +105,12 @@ function jsHelpers() {
         function arr(c, fn){ const out=[]; for (let i=0;i<len(c);i++){ try { out.push(fn(at(c,i), i)); } catch(e){ out.push({ index:i, warning:String(e) }); } } return out; }
         function safe(fn, fallback=null){ try { return fn(); } catch(e){ return fallback; } }
         function meta(item){ return { objectId:safe(()=>item.id), name:safe(()=>item.name), type:safe(()=>item.constructor.name), bounds:safe(()=>item.geometricBounds), layer:safe(()=>item.itemLayer.name), locked:safe(()=>item.locked,false), visible:safe(()=>item.visible,true) }; }
+        function clone(v){ return JSON.parse(JSON.stringify(v)); }
         function itemById(id){ const items = doc.allPageItems || doc.pageItems; for (let i=0;i<len(items);i++){ const it=at(items,i); if (safe(()=>it.id) === id) return it; } throw new Error('Object not found: '+id); }
         function itemByName(name){ const hits=[]; const items = doc.allPageItems || doc.pageItems; for (let i=0;i<len(items);i++){ const it=at(items,i); if (safe(()=>it.name) === name) hits.push(it); } if (hits.length !== 1) throw new Error('Expected one object named '+name+', found '+hits.length); return hits[0]; }
-        function resolveItem(a){ if (a.objectId != null) return itemById(a.objectId); if (a.name) return itemByName(a.name); throw new Error('objectId or name is required'); }
+        function labelMatches(label, query){ const keys=Object.keys(query||{}); return keys.length>0 && keys.every((key)=>{ const expected=query[key]; const actual=label ? label[key] : undefined; if (expected && typeof expected === 'object' && !Array.isArray(expected)) return labelMatches(actual||{}, expected); return actual === expected; }); }
+        function itemByLabelQuery(query){ const hits=[]; const items = doc.allPageItems || doc.pageItems; for (let i=0;i<len(items);i++){ const it=at(items,i); if (labelMatches(readLabel(it), query)) hits.push(it); } if (hits.length !== 1) throw new Error('Expected one object for labelQuery, found '+hits.length); return hits[0]; }
+        function resolveItem(a){ if (a.objectId != null) return itemById(a.objectId); if (a.name) return itemByName(a.name); if (a.labelQuery) return itemByLabelQuery(a.labelQuery); throw new Error('objectId, name, or labelQuery is required'); }
         function resolveItems(a){ const ids=a.objectIds||[]; if (!ids.length) throw new Error('objectIds is required'); return ids.map(itemById); }
         function named(coll, name, kind){ const x = coll.itemByName(name); if (!x || x.isValid === false) throw new Error(kind+' not found: '+name); return x; }
         function readLabel(it){ let raw=''; try { raw = it.extractLabel ? it.extractLabel(${q(LABEL_KEY)}) : it.label; } catch(e) {} try { return raw ? JSON.parse(raw) : {}; } catch(e){ return { rawLabel: raw }; } }
@@ -51,12 +118,72 @@ function jsHelpers() {
         function cleanName(name){ if (!name) return name; if (!/^[a-z0-9]+(?:_[a-z0-9]+)*__(?:[a-z0-9]+_?)*__[a-z0-9_]+$/.test(name) && /[\\/"'\x00-\x1f]/.test(name)) throw new Error('Invalid semantic object name'); return name; }
         function toPt(v, unit){ return unit === 'mm' ? v * 2.8346456693 : v; }
         function boundsInPt(bounds, unit){ if (!Array.isArray(bounds) || bounds.length !== 4) throw new Error('bounds must be [top,left,bottom,right]'); const b=bounds.map(Number); if (b.some(x=>!Number.isFinite(x))) throw new Error('bounds must contain finite numbers'); if (b[2] <= b[0] || b[3] <= b[1]) throw new Error('bounds must have positive width and height'); return b.map(x=>toPt(x, unit || 'pt')); }
+        function roundMaybe(v, step){ return step ? Math.round(v / step) * step : v; }
+        function widthOf(b){ return b[3] - b[1]; }
+        function heightOf(b){ return b[2] - b[0]; }
+        function centerXOf(b){ return (b[1] + b[3]) / 2; }
+        function centerYOf(b){ return (b[0] + b[2]) / 2; }
+        function pageIndexOf(item){ const parentPage = safe(()=>item.parentPage, null); if (!parentPage) return null; for (let i=0;i<len(doc.pages);i++) if (safe(()=>at(doc.pages,i).id) === safe(()=>parentPage.id)) return i; return null; }
+        function pageByIndex(index){ if (index == null || index < 0 || index >= len(doc.pages)) throw new Error('pageIndex out of range'); return at(doc.pages, index); }
+        function pageBounds(index){ return clone(pageByIndex(index).bounds); }
+        function spreadBoundsForPage(index){ const page = pageByIndex(index); const spread = safe(()=>page.parent, null); if (!spread) return clone(page.bounds); const pages = arr(spread.pages, (p)=>safe(()=>p.bounds)); const top = Math.min.apply(null, pages.map((b)=>b[0])); const left = Math.min.apply(null, pages.map((b)=>b[1])); const bottom = Math.max.apply(null, pages.map((b)=>b[2])); const right = Math.max.apply(null, pages.map((b)=>b[3])); return [top,left,bottom,right]; }
+        function setBoundsRaw(item, bounds){ item.geometricBounds = bounds; return clone(item.geometricBounds); }
+        function setBoundsSmart(item, nextBounds, options){ const current = clone(item.geometricBounds); let target = clone(nextBounds); const preserveAspectRatio = !!(options && options.preserveAspectRatio); const preserveCenter = !!(options && options.preserveCenter); const anchor = options && options.anchor || 'topLeft'; const roundTo = options && options.roundTo || null; if (preserveCenter) {
+                const w = widthOf(target), h = heightOf(target), cx = centerXOf(current), cy = centerYOf(current);
+                target = [cy - h / 2, cx - w / 2, cy + h / 2, cx + w / 2];
+            }
+            if (preserveAspectRatio) {
+                const oldW = widthOf(current), oldH = heightOf(current), ratio = oldW / oldH, targetW = widthOf(target), targetH = heightOf(target);
+                let newW = targetW, newH = targetH;
+                if (targetW / targetH > ratio) newW = targetH * ratio; else newH = targetW / ratio;
+                if (anchor === 'center') {
+                    const cx = centerXOf(target), cy = centerYOf(target);
+                    target = [cy - newH / 2, cx - newW / 2, cy + newH / 2, cx + newW / 2];
+                } else if (anchor === 'bottomRight') {
+                    target = [target[2] - newH, target[3] - newW, target[2], target[3]];
+                } else {
+                    target = [target[0], target[1], target[0] + newH, target[1] + newW];
+                }
+            }
+            if (roundTo) target = target.map((v)=>roundMaybe(v, roundTo));
+            return setBoundsRaw(item, target);
+        }
+        function applyFitMode(item, fitMode){ const { FitOptions } = require('indesign'); const fitMap = { proportionally: FitOptions.PROPORTIONALLY, fillProportionally: FitOptions.FILL_PROPORTIONALLY, contentToFrame: FitOptions.CONTENT_TO_FRAME, frameToContent: FitOptions.FRAME_TO_CONTENT, centerContent: FitOptions.CENTER_CONTENT, PROPORTIONALLY: FitOptions.PROPORTIONALLY, FILL_FRAME: FitOptions.FILL_PROPORTIONALLY, FIT_CONTENT: FitOptions.CONTENT_TO_FRAME, FIT_FRAME: FitOptions.FRAME_TO_CONTENT }; if (fitMode && fitMap[fitMode]) item.fit(fitMap[fitMode]); }
+        function linkInfo(item){ return safe(()=>{ const graphic = item.graphics && len(item.graphics) ? at(item.graphics,0) : null; const link = graphic && graphic.itemLink; return link ? { name:safe(()=>link.name), path:safe(()=>link.filePath), status:String(safe(()=>link.status,'')) } : null; }, null); }
+        function textExcerpt(item){ return { excerpt:String(safe(()=>item.contents,'') || '').slice(0,500), overset:!!safe(()=>item.overflows,false) }; }
+        function itemSnapshot(item){ return { objectId:safe(()=>item.id), name:safe(()=>item.name), type:safe(()=>item.constructor.name), pageIndex:pageIndexOf(item), bounds:clone(safe(()=>item.geometricBounds, null)), label:clone(readLabel(item)), text:/TextFrame/i.test(safe(()=>item.constructor.name,'')) ? textExcerpt(item) : null, link:linkInfo(item), objectStyle:safe(()=>item.appliedObjectStyle && item.appliedObjectStyle.name, null), fillSwatch:safe(()=>item.fillColor && item.fillColor.name, null), strokeSwatch:safe(()=>item.strokeColor && item.strokeColor.name, null), strokeWeight:safe(()=>item.strokeWeight, null) }; }
         function applyBasics(it,args){ if(args.name) it.name=cleanName(args.name); if(args.label) writeLabel(it,args.label); if(args.objectStyle) { const s=named(doc.objectStyles,args.objectStyle,'Object style'); if(it.applyObjectStyle) it.applyObjectStyle(s, false, false); else it.appliedObjectStyle=s; } if(args.fillSwatch) it.fillColor=named(doc.swatches,args.fillSwatch,'Swatch'); if(args.strokeSwatch) it.strokeColor=named(doc.swatches,args.strokeSwatch,'Swatch'); if(args.strokeWeight!=null) it.strokeWeight=args.strokeWeight; }
         function applyTextStyles(it,args){ const text=safe(()=>it.texts.item(0)); if(!text || text.isValid===false) return; if(args.paragraphStyle){ const s=named(doc.paragraphStyles,args.paragraphStyle,'Paragraph style'); if(text.applyParagraphStyle) text.applyParagraphStyle(s, false); else text.appliedParagraphStyle=s; } if(args.characterStyle){ const s=named(doc.characterStyles,args.characterStyle,'Character style'); if(text.applyCharacterStyle) text.applyCharacterStyle(s); else text.appliedCharacterStyle=s; } }
     `;
 }
 
 export class TemplateHandlers {
+    static inspectionLogPath(manifest = loadWorkspace()) {
+        return assertWorkspacePath(path.join(manifest.workspaceRoot, 'logs', 'derivative_inspections.jsonl'), { kind: 'logs', manifest }).path;
+    }
+
+    static loadInspectionSnapshots(manifest = loadWorkspace()) {
+        return ensureJsonlArray(this.inspectionLogPath(manifest));
+    }
+
+    static appendInspectionSnapshot(manifest, snapshot) {
+        appendJsonl(this.inspectionLogPath(manifest), snapshot);
+    }
+
+    static resolveDerivativeRecord(manifest, args = {}) {
+        if (args.derivativeId) {
+            const record = (manifest.derivatives || []).find((entry) => entry.derivativeId === args.derivativeId);
+            if (!record) throw new Error(`Unknown derivativeId: ${args.derivativeId}`);
+            return record;
+        }
+        if (args.pageIndex != null) {
+            const record = (manifest.derivatives || []).find((entry) => entry.pageIndex === args.pageIndex);
+            if (!record) throw new Error(`No derivative mapped to pageIndex ${args.pageIndex}`);
+            return record;
+        }
+        throw new Error('derivativeId or pageIndex is required');
+    }
+
     static async handle(name, args = {}) {
         if (this[name]) return this[name](args);
         return response(this.uxpTool(name, args), name);
@@ -179,6 +306,504 @@ export class TemplateHandlers {
 
     static get_derivative_status(args = {}) {
         return response(loadWorkspace().derivatives.find((d) => d.derivativeId === args.derivativeId) || null, 'get_derivative_status');
+    }
+
+    static create_derivative_page(args = {}) {
+        return response((async () => {
+            if (!args.derivativeId) throw new Error('derivativeId is required');
+            const manifest = loadWorkspace();
+            const pageSize = derivativePageSize(args);
+            const basePageIndex = args.basePageIndex ?? 0;
+            const created = await this.create_page({
+                pageWidth: pageSize.width,
+                pageHeight: pageSize.height,
+                unit: 'pt',
+                name: args.name,
+                derivativeId: args.derivativeId
+            });
+            let duplicatedMotifs = [];
+            if (args.duplicateBaseMotifs) {
+                const dupe = await this.duplicate_items_to_page({
+                    sourceLabelQueries: [{ editable: true }],
+                    sourcePageIndex: basePageIndex,
+                    targetPageIndex: created.pageIndex,
+                    preserveRelativePositions: true,
+                    labelPatch: { derivativeId: args.derivativeId, duplicatedFromBasePageIndex: basePageIndex }
+                });
+                duplicatedMotifs = dupe.duplicatedObjects;
+            }
+            upsertDerivativePage(manifest, args.derivativeId, {
+                pageIndex: created.pageIndex,
+                name: args.name || created.name || null,
+                format: args.pageSize || 'custom',
+                pageSize,
+                basePageIndex,
+                status: 'draft'
+            });
+            return {
+                success: true,
+                derivativeId: args.derivativeId,
+                pageIndex: created.pageIndex,
+                pageSize,
+                ...(duplicatedMotifs.length ? { duplicatedMotifs } : {})
+            };
+        })(), 'create_derivative_page');
+    }
+
+    static duplicate_items_to_page(args = {}) {
+        return response(runGuarded(`${jsHelpers()} const args=${q(args)};
+            function collectSourceItems(){
+                const hits=[];
+                if (Array.isArray(args.sourceObjectIds)) for (const id of args.sourceObjectIds) hits.push(itemById(id));
+                if (Array.isArray(args.sourceLabelQueries)) {
+                    for (const query of args.sourceLabelQueries) {
+                        const items = arr(doc.allPageItems || doc.pageItems, (x)=>x).filter((it)=>labelMatches(readLabel(it), query) && (args.sourcePageIndex == null || pageIndexOf(it) === args.sourcePageIndex));
+                        hits.push(...items);
+                    }
+                }
+                const seen = new Set();
+                return hits.filter((item)=>{ const id=safe(()=>item.id); if (seen.has(id)) return false; seen.add(id); return true; });
+            }
+            const sourceItems = collectSourceItems();
+            if (!sourceItems.length) throw new Error('No source items matched');
+            const targetPage = pageByIndex(args.targetPageIndex);
+            const offset = Array.isArray(args.offset) ? [toPt(Number(args.offset[0] || 0), 'pt'), toPt(Number(args.offset[1] || 0), 'pt')] : [0,0];
+            const scale = args.scale == null ? 1 : Number(args.scale);
+            const duplicatedObjects = [];
+            for (const source of sourceItems) {
+                const duplicate = source.duplicate(targetPage);
+                const before = clone(safe(()=>duplicate.geometricBounds));
+                let after = before;
+                if (after && args.preserveRelativePositions !== false) {
+                    const top = before[0] + offset[0], left = before[1] + offset[1], width = widthOf(before) * scale, height = heightOf(before) * scale;
+                    after = [top, left, top + height, left + width];
+                    setBoundsRaw(duplicate, after);
+                }
+                if (args.renamePrefix) duplicate.name = String(args.renamePrefix) + (safe(()=>source.name) || safe(()=>source.id));
+                const label = Object.assign({}, readLabel(duplicate), args.labelPatch || {});
+                writeLabel(duplicate, label);
+                duplicatedObjects.push({ sourceObjectId:safe(()=>source.id), objectId:safe(()=>duplicate.id), name:safe(()=>duplicate.name), type:safe(()=>duplicate.constructor.name), pageIndex:args.targetPageIndex, bounds:clone(safe(()=>duplicate.geometricBounds)), label });
+            }
+            return { success:true, duplicatedObjects };
+        `), 'duplicate_items_to_page');
+    }
+
+    static create_text_slot(args = {}) {
+        return response((async () => {
+            if (!args.derivativeId || !args.role || !args.slot || args.pageIndex == null || !args.bounds || args.text == null) throw new Error('derivativeId, role, slot, pageIndex, bounds, and text are required');
+            const label = shallowMergeLabel({ derivativeId: args.derivativeId, role: args.role, slot: args.slot, source: 'agent_created', editable: true, placeholder: false }, args.label);
+            const created = await this.uxpTool('create_text_frame', {
+                ...args,
+                name: args.name || `${args.derivativeId}__${args.role}__text`,
+                label,
+                text: String(args.text)
+            });
+            let fitResult = null;
+            if (args.autoFit) fitResult = await this.fit_text_to_frame({ objectId: created.objectId });
+            return { ...created, label, ...(fitResult ? { fitResult } : {}) };
+        })(), 'create_text_slot');
+    }
+
+    static create_image_slot(args = {}) {
+        return response((async () => {
+            if (!args.derivativeId || !args.role || !args.slot || args.pageIndex == null || !args.bounds) throw new Error('derivativeId, role, slot, pageIndex, and bounds are required');
+            const manifest = loadWorkspace();
+            const imagePath = args.imagePath ? resolveWorkspaceImagePath(args.imagePath, manifest) : null;
+            const label = shallowMergeLabel({ derivativeId: args.derivativeId, role: args.role, slot: args.slot, source: 'agent_created', editable: true, placeholder: !imagePath && args.placeholder !== false }, args.label);
+            return this.uxpTool('create_image_frame', {
+                ...args,
+                imagePath,
+                placeholder: !imagePath && args.placeholder !== false,
+                name: args.name || `${args.derivativeId}__${args.role}__image_frame`,
+                label
+            });
+        })(), 'create_image_slot');
+    }
+
+    static fit_text_to_frame(args = {}) {
+        return response(runGuarded(`${jsHelpers()} const args=${q(args)};
+            const it = resolveItem(args);
+            if (!/TextFrame/i.test(String(safe(()=>it.constructor.name,'')))) throw new Error('Target is not a text frame');
+            const actions = ['heuristic'];
+            function firstTextRange(){ return safe(()=>it.texts.item(0), null) || safe(()=>it.parentStory.texts.item(0), null); }
+            function state(){ const t = firstTextRange(); return { pointSize:Number(safe(()=>t.pointSize, 0) || 0), leading:Number(safe(()=>t.leading, 0) || 0), tracking:Number(safe(()=>t.tracking, 0) || 0), bounds:clone(safe(()=>it.geometricBounds)), overset:!!safe(()=>it.overflows,false) }; }
+            function applyPointSize(value){ const t = firstTextRange(); if (t) t.pointSize = value; }
+            function applyLeading(value){ const t = firstTextRange(); if (t) t.leading = value; }
+            function applyTracking(value){ const t = firstTextRange(); if (t) t.tracking = value; }
+            const before = state();
+            const minPointSize = Number(args.minPointSize ?? 6);
+            const maxPointSize = Number(args.maxPointSize ?? before.pointSize || 72);
+            const minLeading = Number(args.minLeading ?? Math.max(6, before.leading || before.pointSize || 6));
+            const minTracking = Number(args.minTracking ?? -50);
+            const maxIterations = Number(args.maxIterations ?? 12);
+            let iterations = 0;
+            while (safe(()=>it.overflows,false) && iterations < maxIterations) {
+                iterations += 1;
+                const current = state();
+                if (current.pointSize > minPointSize) { applyPointSize(Math.max(minPointSize, current.pointSize - 1)); actions.push('reduce_point_size'); continue; }
+                if (current.leading > minLeading) { applyLeading(Math.max(minLeading, current.leading - 1)); actions.push('reduce_leading'); continue; }
+                if (args.allowTrackingTighten && current.tracking > minTracking) { applyTracking(Math.max(minTracking, current.tracking - 5)); actions.push('tighten_tracking'); continue; }
+                if (args.allowFrameGrow) {
+                    const maxGrowPt = args.maxGrowMm != null ? toPt(Number(args.maxGrowMm), args.unit || 'mm') : toPt(10, 'mm');
+                    const currentBounds = clone(it.geometricBounds);
+                    const growth = Math.min(maxGrowPt, toPt(2, 'mm'));
+                    const nextBounds = (args.growAnchor || 'topLeft') === 'center'
+                        ? [currentBounds[0] - growth / 2, currentBounds[1] - growth / 2, currentBounds[2] + growth / 2, currentBounds[3] + growth / 2]
+                        : [currentBounds[0], currentBounds[1], currentBounds[2] + growth, currentBounds[3] + growth];
+                    setBoundsRaw(it, nextBounds); actions.push('grow_frame'); continue;
+                }
+                break;
+            }
+            const after = state();
+            return { success:true, objectId:safe(()=>it.id), before, after, actions };
+        `), 'fit_text_to_frame');
+    }
+
+    static export_derivative_preview(args = {}) {
+        return response((async () => {
+            if (!args.derivativeId || args.pageIndex == null) throw new Error('derivativeId and pageIndex are required');
+            const manifest = loadWorkspace();
+            const ext = (args.format || 'png').toLowerCase() === 'jpg' ? 'jpg' : 'png';
+            const existing = (manifest.previews || []).filter((preview) => preview.derivativeId === args.derivativeId && preview.pageIndex === args.pageIndex);
+            const outputName = `${args.derivativeId}__${args.pageIndex}__preview_${String(existing.length + 1).padStart(3, '0')}.${ext}`;
+            const rec = await this.exportPreview('page', { ...args, pageIndex: args.pageIndex, format: ext, outputName, overwrite: args.overwrite });
+            const previewId = `preview_${args.derivativeId}_${String(existing.length + 1).padStart(3, '0')}`;
+            const preview = { ...rec, previewId, derivativeId: args.derivativeId, mimeType: ext === 'jpg' ? 'image/jpeg' : 'image/png', createdAt: nowIso() };
+            const fresh = loadWorkspace();
+            fresh.previews = (fresh.previews || []).filter((item) => item.previewId !== rec.previewId).concat(preview);
+            saveWorkspace(fresh);
+            const derivative = this.resolveDerivativeRecord(fresh, { derivativeId: args.derivativeId });
+            upsertDerivativePage(fresh, args.derivativeId, {
+                latestPreviewId: previewId,
+                previewIds: [...new Set([...(derivative.previewIds || []), previewId])]
+            });
+            return { success:true, previewId, derivativeId: args.derivativeId, pageIndex: args.pageIndex, path: preview.path, mimeType: preview.mimeType, widthPx: preview.width, heightPx: preview.height, createdAt: preview.createdAt };
+        })(), 'export_derivative_preview');
+    }
+
+    static inspect_derivative(args = {}) {
+        return response((async () => {
+            const manifest = loadWorkspace();
+            const derivative = this.resolveDerivativeRecord(manifest, args);
+            const itemsResult = await this.uxpTool('inspect_page_items_v2', { pageIndex: derivative.pageIndex, includeHidden: true, includeTextExcerpt: true });
+            const checksResult = args.includeChecks ? await this.run_derivative_checks({ derivativeId: derivative.derivativeId, pageIndex: derivative.pageIndex }) : null;
+            const objects = itemsResult.items || [];
+            const textSlots = objects.filter((item) => item.type && /TextFrame/i.test(item.type));
+            const imageSlots = objects.filter((item) => item.image?.hasPlacedGraphic || /Rectangle|Oval|Polygon/i.test(item.type || '')).filter((item) => item.label?.slot || item.image?.hasPlacedGraphic);
+            const vectorObjects = objects.filter((item) => !item.text && !item.image?.hasPlacedGraphic);
+            const unlabeledObjects = objects.filter((item) => !item.label || !Object.keys(item.label).length);
+            const previews = (manifest.previews || []).filter((preview) => preview.derivativeId === derivative.derivativeId && preview.pageIndex === derivative.pageIndex);
+            const versions = (manifest.versions || []).filter((version) => version.derivativeId === derivative.derivativeId);
+            const snapshot = { inspectionId: `inspection_${derivative.derivativeId}_${String((derivative.inspectionIds || []).length + 1).padStart(3, '0')}`, derivativeId: derivative.derivativeId, pageIndex: derivative.pageIndex, createdAt: nowIso(), previewId: derivative.latestPreviewId || null, objects, textSlots, imageSlots, vectorObjects, unlabeledObjects, checks: checksResult?.checks || null };
+            this.appendInspectionSnapshot(manifest, snapshot);
+            upsertDerivativePage(manifest, derivative.derivativeId, { inspectionIds: [...new Set([...(derivative.inspectionIds || []), snapshot.inspectionId])] });
+            return { success:true, derivativeId: derivative.derivativeId, pageIndex: derivative.pageIndex, format: derivative.format, objects: args.includeObjectDetails === false ? objects.map((item) => ({ objectId: item.objectId, name: item.name, type: item.type, bounds: item.bounds, label: item.label })) : objects, textSlots, imageSlots, vectorObjects, unlabeledObjects, previews: args.includePreviewHistory ? previews : previews.slice(-1), versions, ...(checksResult ? { checks: checksResult.checks } : {}) };
+        })(), 'inspect_derivative');
+    }
+
+    static apply_layout_recipe(args = {}) {
+        return response(runGuarded(`${jsHelpers()} const args=${q(args)};
+            if (!args.derivativeId) throw new Error('derivativeId is required');
+            const edits = Array.isArray(args.edits) ? args.edits : [];
+            const mode = args.mode || 'fail_fast';
+            if (!edits.length) throw new Error('edits are required');
+            if (mode === 'fail_fast') edits.forEach((edit)=>resolveItem(edit));
+            const edited = [];
+            const errors = [];
+            for (const edit of edits) {
+                try {
+                    const it = resolveItem(edit);
+                    const before = itemSnapshot(it);
+                    const actions = [];
+                    if (edit.setBounds) { setBoundsSmart(it, boundsInPt(edit.setBounds, 'pt'), {}); actions.push('setBounds'); }
+                    if (edit.setText != null) { it.contents = String(edit.setText); actions.push('setText'); }
+                    if (edit.applyStyle) {
+                        applyTextStyles(it, edit.applyStyle);
+                        if (edit.applyStyle.objectStyle) applyBasics(it, edit.applyStyle);
+                        actions.push('applyStyle');
+                    }
+                    if (edit.applySwatch) {
+                        applyBasics(it, edit.applySwatch);
+                        const text = safe(()=>it.texts.item(0), null);
+                        if (text && edit.applySwatch.textFillSwatch) text.fillColor = named(doc.swatches, edit.applySwatch.textFillSwatch, 'Swatch');
+                        actions.push('applySwatch');
+                    }
+                    if (edit.zOrder === 'front') { it.bringToFront(); actions.push('bringToFront'); }
+                    if (edit.zOrder === 'back') { it.sendToBack(); actions.push('sendToBack'); }
+                    if (edit.fitMode) { applyFitMode(it, edit.fitMode); actions.push('fitMode'); }
+                    if (edit.labelPatch) { writeLabel(it, Object.assign({}, readLabel(it), edit.labelPatch)); actions.push('labelPatch'); }
+                    edited.push({ objectId:safe(()=>it.id), name:safe(()=>it.name), before, after:itemSnapshot(it), actions });
+                } catch (error) {
+                    if (mode === 'fail_fast') throw error;
+                    errors.push({ edit, error:String(error.message || error) });
+                }
+            }
+            return { success:true, derivativeId:args.derivativeId, edited, ...(errors.length ? { errors } : {}) };
+        `), 'apply_layout_recipe');
+    }
+
+    static set_bounds(args = {}) {
+        return response(runGuarded(`${jsHelpers()} const args=${q(args)};
+            const it = resolveItem(args);
+            const oldBounds = clone(safe(()=>it.geometricBounds));
+            const newBounds = setBoundsSmart(it, boundsInPt(args.bounds, args.unit || 'pt'), { preserveCenter:args.preserveCenter, preserveAspectRatio:args.preserveAspectRatio, anchor:args.anchor, roundTo:args.roundTo });
+            return { success:true, objectId:safe(()=>it.id), oldBounds, newBounds, unit:'pt', ...(args.returnBeforeAfter ? { before:oldBounds, after:newBounds } : {}) };
+        `), 'set_bounds');
+    }
+
+    static align_items(args = {}) {
+        return response(runGuarded(`${jsHelpers()} const args=${q(args)};
+            const items = resolveItems(args);
+            if (!items.length) throw new Error('objectIds are required');
+            const before = items.map(itemSnapshot);
+            function targetBounds(){
+                if (args.alignTo === 'page') return pageBounds(args.pageIndex != null ? args.pageIndex : pageIndexOf(items[0]));
+                if (args.alignTo === 'spread') return spreadBoundsForPage(args.pageIndex != null ? args.pageIndex : pageIndexOf(items[0]));
+                if (args.alignTo === 'referenceObject') return clone(itemById(args.referenceObjectId).geometricBounds);
+                const bounds = items.map((it)=>clone(it.geometricBounds));
+                return [Math.min.apply(null,bounds.map((b)=>b[0])), Math.min.apply(null,bounds.map((b)=>b[1])), Math.max.apply(null,bounds.map((b)=>b[2])), Math.max.apply(null,bounds.map((b)=>b[3]))];
+            }
+            const target = targetBounds();
+            for (const item of items) {
+                const bounds = clone(item.geometricBounds);
+                const width = widthOf(bounds), height = heightOf(bounds);
+                let next = clone(bounds);
+                if (args.mode === 'left') next = [bounds[0], target[1], bounds[0] + height, target[1] + width];
+                else if (args.mode === 'right') next = [bounds[0], target[3] - width, bounds[0] + height, target[3]];
+                else if (args.mode === 'top') next = [target[0], bounds[1], target[0] + height, bounds[1] + width];
+                else if (args.mode === 'bottom') next = [target[2] - height, bounds[1], target[2], bounds[1] + width];
+                else if (args.mode === 'centerX') { const cx = centerXOf(target); next = [bounds[0], cx - width / 2, bounds[2], cx + width / 2]; }
+                else if (args.mode === 'centerY') { const cy = centerYOf(target); next = [cy - height / 2, bounds[1], cy + height / 2, bounds[3]]; }
+                else throw new Error('Unsupported align mode');
+                setBoundsRaw(item, next);
+            }
+            return { success:true, mode:args.mode, alignTo:args.alignTo, before, after:items.map(itemSnapshot) };
+        `), 'align_items');
+    }
+
+    static distribute_items(args = {}) {
+        return response(runGuarded(`${jsHelpers()} const args=${q(args)};
+            const items = resolveItems(args);
+            if (items.length < 2) throw new Error('At least two objects are required');
+            const axis = args.axis;
+            const mode = args.mode || 'centers';
+            const before = items.map(itemSnapshot);
+            const sorted = items.slice().sort((a,b)=> axis === 'horizontal' ? centerXOf(a.geometricBounds) - centerXOf(b.geometricBounds) : centerYOf(a.geometricBounds) - centerYOf(b.geometricBounds));
+            const fixedSpacing = args.fixedSpacing != null ? toPt(Number(args.fixedSpacing), args.unit || 'pt') : null;
+            const container = (()=>{
+                if (args.within === 'page') return pageBounds(args.pageIndex != null ? args.pageIndex : pageIndexOf(sorted[0]));
+                if (args.within === 'spread') return spreadBoundsForPage(args.pageIndex != null ? args.pageIndex : pageIndexOf(sorted[0]));
+                const bounds = sorted.map((it)=>clone(it.geometricBounds));
+                return [Math.min.apply(null,bounds.map((b)=>b[0])), Math.min.apply(null,bounds.map((b)=>b[1])), Math.max.apply(null,bounds.map((b)=>b[2])), Math.max.apply(null,bounds.map((b)=>b[3]))];
+            })();
+            if (mode === 'gaps') {
+                let cursor = axis === 'horizontal' ? container[1] : container[0];
+                for (const item of sorted) {
+                    const b = clone(item.geometricBounds); const width = widthOf(b); const height = heightOf(b);
+                    const gap = fixedSpacing != null ? fixedSpacing : ((axis === 'horizontal' ? widthOf(container) : heightOf(container)) - sorted.reduce((sum, it)=>sum + (axis === 'horizontal' ? widthOf(it.geometricBounds) : heightOf(it.geometricBounds)), 0)) / (sorted.length - 1);
+                    const next = axis === 'horizontal' ? [b[0], cursor, b[0] + height, cursor + width] : [cursor, b[1], cursor + height, b[1] + width];
+                    setBoundsRaw(item, next);
+                    cursor += (axis === 'horizontal' ? width : height) + gap;
+                }
+            } else {
+                const first = sorted[0].geometricBounds;
+                const last = sorted[sorted.length - 1].geometricBounds;
+                const start = axis === 'horizontal' ? centerXOf(first) : centerYOf(first);
+                const end = axis === 'horizontal' ? centerXOf(last) : centerYOf(last);
+                const step = fixedSpacing != null ? fixedSpacing : (end - start) / (sorted.length - 1);
+                sorted.forEach((item, index)=>{
+                    const b = clone(item.geometricBounds); const width = widthOf(b); const height = heightOf(b); const targetCenter = fixedSpacing != null ? start + step * index : (index === 0 ? start : index === sorted.length - 1 ? end : start + step * index);
+                    const next = axis === 'horizontal' ? [b[0], targetCenter - width / 2, b[2], targetCenter + width / 2] : [targetCenter - height / 2, b[1], targetCenter + height / 2, b[3]];
+                    setBoundsRaw(item, next);
+                });
+            }
+            return { success:true, axis, mode, before, after:items.map(itemSnapshot) };
+        `), 'distribute_items');
+    }
+
+    static replace_image_in_frame(args = {}) {
+        return response((async () => {
+            const manifest = loadWorkspace();
+            const imagePath = resolveWorkspaceImagePath(args.imagePath, manifest);
+            return runGuarded(`${jsHelpers()} const args=${q({ ...args, imagePath })};
+                const it = resolveItem(args);
+                const oldBounds = clone(safe(()=>it.geometricBounds));
+                it.place(args.imagePath, false);
+                applyFitMode(it, args.fitMode || 'proportionally');
+                if (args.preserveFrame !== false) setBoundsRaw(it, oldBounds);
+                return { success:true, objectId:safe(()=>it.id), name:safe(()=>it.name), bounds:clone(safe(()=>it.geometricBounds)), link:linkInfo(it) };
+            `);
+        })(), 'replace_image_in_frame');
+    }
+
+    static update_text_slot(args = {}) {
+        return response((async () => {
+            if (args.text == null) throw new Error('text is required');
+            const updated = await runGuarded(`${jsHelpers()} const args=${q(args)};
+                const it = resolveItem(args);
+                const prior = /TextFrame/i.test(String(safe(()=>it.constructor.name,''))) ? clone(itemSnapshot(it)) : null;
+                const textStyles = prior && args.preserveStyle !== false ? { paragraphStyle:safe(()=>it.paragraphs.item(0).appliedParagraphStyle.name, null), characterStyle:safe(()=>it.textStyleRanges.item(0).appliedCharacterStyle.name, null) } : null;
+                it.contents = String(args.text);
+                if (textStyles) applyTextStyles(it, textStyles);
+                return { success:true, objectId:safe(()=>it.id), name:safe(()=>it.name), text:textExcerpt(it) };
+            `);
+            let fitResult = null;
+            if (args.fit) fitResult = await this.fit_text_to_frame({ objectId: updated.objectId });
+            return { ...updated, ...(fitResult ? { fitResult } : {}) };
+        })(), 'update_text_slot');
+    }
+
+    static move_resize_items(args = {}) {
+        return response(runGuarded(`${jsHelpers()} const args=${q(args)};
+            const items = resolveItems(args);
+            const before = items.map(itemSnapshot);
+            const offset = Array.isArray(args.offset) ? [toPt(Number(args.offset[0] || 0), args.unit || 'pt'), toPt(Number(args.offset[1] || 0), args.unit || 'pt')] : [0,0];
+            const scale = args.scale == null ? 1 : Number(args.scale);
+            const targetBox = args.targetBox ? boundsInPt(args.targetBox, args.unit || 'pt') : null;
+            const sourceBox = (()=>{ const bounds = items.map((it)=>clone(it.geometricBounds)); return [Math.min.apply(null,bounds.map((b)=>b[0])), Math.min.apply(null,bounds.map((b)=>b[1])), Math.max.apply(null,bounds.map((b)=>b[2])), Math.max.apply(null,bounds.map((b)=>b[3]))]; })();
+            for (const item of items) {
+                const bounds = clone(item.geometricBounds); let next = clone(bounds);
+                if (targetBox && args.preserveRelativePositions) {
+                    const relTop = (bounds[0] - sourceBox[0]) / Math.max(1, heightOf(sourceBox));
+                    const relLeft = (bounds[1] - sourceBox[1]) / Math.max(1, widthOf(sourceBox));
+                    const relHeight = heightOf(bounds) / Math.max(1, heightOf(sourceBox));
+                    const relWidth = widthOf(bounds) / Math.max(1, widthOf(sourceBox));
+                    next = [targetBox[0] + relTop * heightOf(targetBox), targetBox[1] + relLeft * widthOf(targetBox), targetBox[0] + (relTop + relHeight) * heightOf(targetBox), targetBox[1] + (relLeft + relWidth) * widthOf(targetBox)];
+                } else {
+                    const top = bounds[0] + offset[0], left = bounds[1] + offset[1], width = widthOf(bounds) * scale, height = heightOf(bounds) * scale;
+                    next = [top, left, top + height, left + width];
+                }
+                setBoundsRaw(item, next);
+            }
+            return { success:true, before, after:items.map(itemSnapshot) };
+        `), 'move_resize_items');
+    }
+
+    static create_vector_motif(args = {}) {
+        return response(runGuarded(`${jsHelpers()} const args=${q(args)};
+            if (!args.derivativeId || args.pageIndex == null || !args.motifId) throw new Error('derivativeId, pageIndex, and motifId are required');
+            const page = pageByIndex(args.pageIndex);
+            const created = [];
+            for (const shape of (args.shapes || [])) {
+                let item;
+                if (shape.shapeType === 'rectangle') item = page.rectangles.add({ geometricBounds: boundsInPt(shape.bounds, 'pt') });
+                else if (shape.shapeType === 'oval') item = page.ovals.add({ geometricBounds: boundsInPt(shape.bounds, 'pt') });
+                else if (shape.shapeType === 'polygon') { item = page.polygons.add(); if (shape.bounds) item.geometricBounds = boundsInPt(shape.bounds, 'pt'); }
+                else if (shape.shapeType === 'line') { item = page.graphicLines.add(); item.paths.item(0).entirePath = shape.points || [[0,0],[10,10]]; }
+                else throw new Error('Unsupported shapeType');
+                applyBasics(item, shape);
+                const label = Object.assign({ derivativeId:args.derivativeId, motifId:args.motifId, source:'agent_created', editable:true }, args.label || {});
+                writeLabel(item, label);
+                created.push(item);
+            }
+            let groupId = null;
+            if (args.group && created.length > 1) {
+                const group = page.groups.add(created);
+                writeLabel(group, Object.assign({ derivativeId:args.derivativeId, motifId:args.motifId, source:'agent_created', editable:true }, args.label || {}));
+                groupId = safe(()=>group.id);
+            }
+            return { success:true, motifId:args.motifId, objectIds:created.map((item)=>safe(()=>item.id)), ...(groupId ? { groupId } : {}) };
+        `), 'create_vector_motif');
+    }
+
+    static inspect_layout_grid(args = {}) {
+        return response((async () => {
+            const items = await this.uxpTool('inspect_page_items_v2', { pageIndex: args.pageIndex ?? 0, includeHidden: args.includeHidden === true });
+            const bundle = await this.uxpTool('inspect_document_bundle', {});
+            const page = (bundle.pages || []).find((entry) => entry.index === (args.pageIndex ?? 0)) || {};
+            const visibleItems = (items.items || []).filter((item) => args.includeHidden || item.visible !== false);
+            const xs = visibleItems.flatMap((item) => item.bounds ? [item.bounds[1], item.bounds[3]] : []);
+            const ys = visibleItems.flatMap((item) => item.bounds ? [item.bounds[0], item.bounds[2]] : []);
+            const widths = visibleItems.map((item) => item.bounds ? item.bounds[3] - item.bounds[1] : null).filter(Number.isFinite);
+            const heights = visibleItems.map((item) => item.bounds ? item.bounds[2] - item.bounds[0] : null).filter(Number.isFinite);
+            const round = (value) => Math.round(value * 100) / 100;
+            const uniqueTop = (values) => [...new Set(values.map(round))].sort((a, b) => a - b).slice(0, 16);
+            const spacingRhythm = uniqueTop([...xs, ...ys].slice(1).map((value, index, arr) => index ? value - arr[index - 1] : null).filter((value) => Number.isFinite(value) && value > 0));
+            return { success:true, source:'derived_from_page_item_bounds', pageIndex: args.pageIndex ?? 0, margins: page.marginPreferences || null, commonX: uniqueTop(xs), commonY: uniqueTop(ys), commonWidths: uniqueTop(widths), commonHeights: uniqueTop(heights), spacingRhythm, likelyGrid: { columns: uniqueTop(xs).length, rows: uniqueTop(ys).length, confidence: visibleItems.length >= 3 ? 0.5 : 0.2, evidenceObjectIds: visibleItems.slice(0, 12).map((item) => item.objectId) }, warnings:['Heuristic only; derived from page item bounds, not native grid metadata'] };
+        })(), 'inspect_layout_grid');
+    }
+
+    static analyze_design_system(args = {}) {
+        return response((async () => {
+            const pageIndex = args.pageIndex ?? 0;
+            const bundle = await this.uxpTool('inspect_document_bundle', {});
+            const items = await this.uxpTool('inspect_page_items_v2', { pageIndex, includeHidden: false, includeTextExcerpt: false });
+            const grid = args.includeGrid ? await this.inspect_layout_grid({ pageIndex }) : null;
+            const visibleItems = items.items || [];
+            const fontCounts = new Map();
+            const geometryCounts = new Map();
+            for (const item of visibleItems) {
+                if (item.text?.fontFamily) fontCounts.set(item.text.fontFamily, (fontCounts.get(item.text.fontFamily) || 0) + 1);
+                if (item.bounds) {
+                    const key = `${Math.round(item.bounds[3] - item.bounds[1])}x${Math.round(item.bounds[2] - item.bounds[0])}`;
+                    geometryCounts.set(key, { key, count: (geometryCounts.get(key)?.count || 0) + 1, evidenceObjectIds: [...(geometryCounts.get(key)?.evidenceObjectIds || []), item.objectId] });
+                }
+            }
+            return { success:true, source:'derived_from_document_inspection', fonts:[...fontCounts.entries()].map(([name,count])=>({ name, count })).sort((a,b)=>b.count-a.count), swatches:(bundle.swatches || []).map((swatch)=>({ name: swatch.name, evidence: 'document_swatches' })), textHierarchy:visibleItems.filter((item)=>item.text?.pointSize).map((item)=>({ pointSize:item.text.pointSize, paragraphStyle:item.text.paragraphStyle, objectId:item.objectId, confidence:0.6 })).slice(0,24), recurringGeometry:[...geometryCounts.values()].filter((entry)=>entry.count > 1), motifs:args.includeMotifs ? visibleItems.filter((item)=>item.label?.motifId).map((item)=>({ motifId:item.label.motifId, objectId:item.objectId, confidence:0.7 })) : [], likelyReusableObjects:visibleItems.filter((item)=>item.label?.editable === true).map((item)=>({ objectId:item.objectId, name:item.name, reason:'editable_label' })), pageZones:grid ? [{ pageIndex, likelyGrid:grid.likelyGrid, spacingRhythm:grid.spacingRhythm }] : [], spacingRhythm:grid?.spacingRhythm || [], warnings:['Heuristic summary of existing design signals only; does not infer creative intent'] };
+        })(), 'analyze_design_system');
+    }
+
+    static compare_derivative_state(args = {}) {
+        return response((async () => {
+            const manifest = loadWorkspace();
+            const derivative = this.resolveDerivativeRecord(manifest, args);
+            const snapshots = this.loadInspectionSnapshots(manifest).filter((snapshot) => snapshot.derivativeId === derivative.derivativeId);
+            const previous = args.previousInspectionId ? snapshots.find((snapshot) => snapshot.inspectionId === args.previousInspectionId) : args.previousPreviewId ? snapshots.find((snapshot) => snapshot.previewId === args.previousPreviewId) : snapshots.at(-2);
+            const current = args.currentPreviewId ? snapshots.find((snapshot) => snapshot.previewId === args.currentPreviewId) : snapshots.at(-1);
+            if (!previous || !current) throw new Error('Need previous and current inspection snapshots');
+            const byId = (list) => new Map((list || []).map((item) => [item.objectId, item]));
+            const prevMap = byId(previous.objects);
+            const currMap = byId(current.objects);
+            const changedObjects = [];
+            const addedObjects = [];
+            const removedObjects = [];
+            const changedBounds = [];
+            const changedText = [];
+            const changedStyles = [];
+            for (const [id, item] of currMap.entries()) {
+                if (!prevMap.has(id)) { addedObjects.push(item); continue; }
+                const prior = prevMap.get(id);
+                if (JSON.stringify(prior) !== JSON.stringify(item)) changedObjects.push({ objectId:id, before:prior, after:item });
+                if (JSON.stringify(prior.bounds) !== JSON.stringify(item.bounds)) changedBounds.push({ objectId:id, before:prior.bounds, after:item.bounds });
+                if (JSON.stringify(prior.text) !== JSON.stringify(item.text)) changedText.push({ objectId:id, before:prior.text, after:item.text });
+                if (prior.objectStyle !== item.objectStyle || prior.fillSwatch !== item.fillSwatch || prior.strokeSwatch !== item.strokeSwatch || prior.strokeWeight !== item.strokeWeight) changedStyles.push({ objectId:id, before:{ objectStyle:prior.objectStyle, fillSwatch:prior.fillSwatch, strokeSwatch:prior.strokeSwatch, strokeWeight:prior.strokeWeight }, after:{ objectStyle:item.objectStyle, fillSwatch:item.fillSwatch, strokeSwatch:item.strokeSwatch, strokeWeight:item.strokeWeight } });
+            }
+            for (const [id, item] of prevMap.entries()) if (!currMap.has(id)) removedObjects.push(item);
+            return { success:true, derivativeId: derivative.derivativeId, changedObjects, addedObjects, removedObjects, changedBounds, changedText, changedStyles };
+        })(), 'compare_derivative_state');
+    }
+
+    static run_derivative_checks(args = {}) {
+        return response((async () => {
+            if (!args.derivativeId && args.pageIndex == null) throw new Error('derivativeId or pageIndex is required');
+            const manifest = loadWorkspace();
+            const derivative = args.derivativeId || args.pageIndex != null ? this.resolveDerivativeRecord(manifest, args) : null;
+            const pageIndex = derivative?.pageIndex ?? args.pageIndex;
+            const itemsResult = await this.uxpTool('inspect_page_items_v2', { pageIndex, includeHidden: true, includeTextExcerpt: true });
+            const linksResult = await this.uxpTool('check_missing_links', {});
+            const fontsResult = await this.uxpTool('check_missing_fonts', {});
+            const objects = itemsResult.items || [];
+            const oversetIssues = objects.filter((item) => item.text?.overset).map((item) => ({ objectId: item.objectId, name: item.name, evidence: item.text.excerpt }));
+            const visibleReference = objects.filter((item) => item.label?.referenceOnly && item.visible !== false).map((item) => ({ objectId: item.objectId, name: item.name }));
+            const unlabeled = objects.filter((item) => !item.label || !Object.keys(item.label).length).map((item) => ({ objectId: item.objectId, name: item.name }));
+            const checks = {
+                oversetText: { ok: oversetIssues.length === 0, issues: oversetIssues },
+                missingLinks: { ok: (linksResult.issues || []).length === 0, issues: linksResult.issues || [] },
+                missingFonts: { ok: (fontsResult.issues || []).length === 0, issues: fontsResult.issues || [], warnings:['Document-scoped; not guaranteed per-page'] },
+                visibleReferenceUnderlay: { ok: visibleReference.length === 0, issues: visibleReference },
+                unlabeledObjects: { ok: unlabeled.length === 0, issues: unlabeled }
+            };
+            const issues = [];
+            if (args.requireNoOverset && !checks.oversetText.ok) issues.push({ check: 'oversetText', issues: checks.oversetText.issues });
+            if (args.requireNoVisibleReferenceUnderlay && !checks.visibleReferenceUnderlay.ok) issues.push({ check: 'visibleReferenceUnderlay', issues: checks.visibleReferenceUnderlay.issues });
+            if (args.requireLabels && !checks.unlabeledObjects.ok) issues.push({ check: 'unlabeledObjects', issues: checks.unlabeledObjects.issues });
+            if (args.requireNoMissingLinks && !checks.missingLinks.ok) issues.push({ check: 'missingLinks', issues: checks.missingLinks.issues });
+            if (args.requireNoMissingFonts && !checks.missingFonts.ok) issues.push({ check: 'missingFonts', issues: checks.missingFonts.issues });
+            if (derivative) {
+                upsertDerivativePage(manifest, derivative.derivativeId, { checkHistory: [...(derivative.checkHistory || []), { createdAt: nowIso(), checks, ok: issues.length === 0 }] });
+            }
+            return { success:true, ok: issues.length === 0, derivativeId: derivative?.derivativeId, pageIndex, checks, issues };
+        })(), 'run_derivative_checks');
     }
 
     static export_page_preview(args = {}) { return this.exportPreview('page', args); }
@@ -400,10 +1025,8 @@ function inspectionAndChecks(name) {
     `;
 }
 
-function layoutAndLabels(name) {
+function buildCreateObjectScript() {
     return `
-        const n = ${q(name)};
-        let it, old;
         function pagePresetSize(name) {
             const k = String(name || '').toLowerCase();
             if (k === 'a5') return { width: 148, height: 210, unit: 'mm' };
@@ -420,8 +1043,7 @@ function layoutAndLabels(name) {
             if (preset) { w = preset.width; h = preset.height; u = preset.unit; }
             if (w == null && h == null) return null;
             if (!(Number.isFinite(Number(w)) && Number.isFinite(Number(h)))) throw new Error('pageWidth/pageHeight must be finite numbers');
-            w = toPt(Number(w), u);
-            h = toPt(Number(h), u);
+            w = toPt(Number(w), u); h = toPt(Number(h), u);
             if (w <= 0 || h <= 0) throw new Error('pageWidth/pageHeight must be positive');
             if (args.orientation === 'landscape' && h > w) { const t = w; w = h; h = t; }
             if (args.orientation === 'portrait' && w > h) { const t = w; w = h; h = t; }
@@ -445,32 +1067,61 @@ function layoutAndLabels(name) {
                 if (dims) p.adjustLayout({ width:dims.width, height:dims.height });
                 const margins = applyPageMargins(p,args);
                 return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null, pageSize:safe(()=>({ width:p.bounds[3]-p.bounds[1], height:p.bounds[2]-p.bounds[0] }), dims), margins };
-            } catch (e) {
-                try { p.remove(); } catch(_) {}
-                throw e;
-            }
+            } catch (e) { try { p.remove(); } catch(_) {} throw e; }
         }
         if (n === 'duplicate_page') { const src=at(doc.pages,args.pageIndex||0); const p=src.duplicate(); return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null }; }
-        if (n === 'create_text_frame') { const p=at(doc.pages,args.pageIndex||0); it=p.textFrames.add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); it.contents=args.text||''; applyBasics(it,args); applyTextStyles(it,args); return { success:true, ...meta(it), unit:'pt', text:{excerpt:String(it.contents).slice(0,500), overset:safe(()=>it.overflows,false)} }; }
-        if (n === 'create_image_frame' || n === 'create_shape') { const p=at(doc.pages,args.pageIndex||0); const type=args.shapeType||'rectangle'; it=(type==='oval'?p.ovals:type==='polygon'?p.polygons:p.rectangles).add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); applyBasics(it,args); if(n==='create_image_frame' && args.imagePath){ it.place(args.imagePath, false); } return { success:true, ...meta(it), unit:'pt', link:safe(()=>({ name:it.graphics.item(0).itemLink.name, status:String(it.graphics.item(0).itemLink.status), path:it.graphics.item(0).itemLink.filePath }), null) }; }
+        if (n === 'create_text_frame') { const p=at(doc.pages,args.pageIndex||0); it=p.textFrames.add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); it.contents=args.text||args.content||''; applyBasics(it,args); applyTextStyles(it,args); return { success:true, ...meta(it), unit:'pt', text:textExcerpt(it) }; }
+        if (n === 'create_image_frame' || n === 'create_shape') { const p=at(doc.pages,args.pageIndex||0); const type=args.shapeType||'rectangle'; it=(type==='oval'?p.ovals:type==='polygon'?p.polygons:p.rectangles).add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); applyBasics(it,args); if(n==='create_image_frame' && args.imagePath){ it.place(args.imagePath, false); if (args.fitMode) applyFitMode(it, args.fitMode); } return { success:true, ...meta(it), unit:'pt', hasPlacedGraphic:!!linkInfo(it), link:linkInfo(it) }; }
         if (n === 'create_line') { const p=at(doc.pages,args.pageIndex||0); it=p.graphicLines.add(); it.paths.item(0).entirePath=[[toPt(args.start[0],args.unit),toPt(args.start[1],args.unit)],[toPt(args.end[0],args.unit),toPt(args.end[1],args.unit)]]; applyBasics(it,args); return { success:true, ...meta(it), unit:'pt' }; }
-        if (n === 'set_text_content') { it=resolveItem(args); it.contents=args.text||''; return { success:true, ...meta(it), text:{excerpt:String(it.contents).slice(0,500), overset:safe(()=>it.overflows,false)} }; }
-        if (n === 'set_bounds') { it=resolveItem(args); old=safe(()=>it.geometricBounds); it.geometricBounds=boundsInPt(args.bounds,args.unit); return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:safe(()=>it.geometricBounds), unit:'pt' }; }
-        if (n === 'move_item' || n === 'resize_item') { it=resolveItem(args); old=safe(()=>it.geometricBounds); const b=old.slice(); if(args.delta){ const dy=toPt(args.delta[0]||0,args.unit), dx=toPt(args.delta[1]||0,args.unit); b[0]+=dy; b[1]+=dx; b[2]+=dy; b[3]+=dx; } if(args.bounds) { const nb=boundsInPt(args.bounds,args.unit); b[0]=nb[0]; b[1]=nb[1]; b[2]=nb[2]; b[3]=nb[3]; } it.geometricBounds=boundsInPt(b,'pt'); return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:safe(()=>it.geometricBounds), unit:'pt' }; }
+    `;
+}
+
+function buildGeometryScript() {
+    return `
+        if (n === 'set_text_content') { it=resolveItem(args); it.contents=args.text||''; return { success:true, ...meta(it), text:textExcerpt(it) }; }
+        if (n === 'set_bounds') { it=resolveItem(args); old=clone(safe(()=>it.geometricBounds)); return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:setBoundsSmart(it, boundsInPt(args.bounds,args.unit), { preserveCenter:args.preserveCenter, preserveAspectRatio:args.preserveAspectRatio, anchor:args.anchor, roundTo:args.roundTo }), unit:'pt' }; }
+        if (n === 'move_item' || n === 'resize_item') { it=resolveItem(args); old=clone(safe(()=>it.geometricBounds)); const b=old.slice(); if(args.delta){ const dy=toPt(args.delta[0]||0,args.unit), dx=toPt(args.delta[1]||0,args.unit); b[0]+=dy; b[1]+=dx; b[2]+=dy; b[3]+=dx; } if(args.bounds) { const nb=boundsInPt(args.bounds,args.unit); b[0]=nb[0]; b[1]=nb[1]; b[2]=nb[2]; b[3]=nb[3]; } return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:setBoundsRaw(it, b), unit:'pt' }; }
         if (n === 'rotate_item') { it=resolveItem(args); old=safe(()=>it.rotationAngle,0); it.rotationAngle=args.degrees||0; return { success:true, objectId:safe(()=>it.id), oldRotation:old, newRotation:safe(()=>it.rotationAngle) }; }
         if (n === 'lock_item' || n === 'unlock_item') { it=resolveItem(args); it.locked=n==='lock_item'; return { success:true, ...meta(it) }; }
         if (n === 'rename_page_item') { it=resolveItem(args); old=safe(()=>it.name); it.name=cleanName(args.name); return { success:true, objectId:safe(()=>it.id), oldName:old, name:safe(()=>it.name) }; }
-        if (n === 'label_object') { it=resolveItem(args); const label=args.merge===false?args.label:{...readLabel(it),...(args.label||{})}; writeLabel(it,label); return { success:true, objectId:safe(()=>it.id), label }; }
-        if (n === 'get_object_label') { it=resolveItem(args); return { success:true, objectId:safe(()=>it.id), label:readLabel(it) }; }
-        if (n === 'find_objects_by_label' || n === 'list_named_objects') { const q=args.labelQuery||args; const hits=arr(doc.allPageItems||doc.pageItems,(x)=>({...meta(x),label:readLabel(x)})).filter(x=>(args.includeHidden || x.visible!==false) && (!args.namePrefix || String(x.name||'').startsWith(args.namePrefix)) && Object.keys(q).every(k=>['labelQuery','includeHidden','namePrefix','pageIndex'].includes(k) || q[k]==null || x.label?.[k]===q[k])); return { success:true, objects:hits }; }
+    `;
+}
+
+function buildStyleScript() {
+    return `
         if (n === 'bring_to_front' || n === 'send_to_back') { it=resolveItem(args); old=safe(()=>it.geometricBounds); if(n==='bring_to_front') it.bringToFront(); else it.sendToBack(); return { success:true, action:n, oldBounds:old, ...meta(it), warnings:['Docs-verified; pending live UXP validation'] }; }
         if (n === 'fit_content_to_frame' || n === 'fit_frame_to_content') { const { FitOptions } = require('indesign'); it=resolveItem(args); old=safe(()=>it.geometricBounds); const mode=n==='fit_content_to_frame'?FitOptions.CONTENT_TO_FRAME:FitOptions.FRAME_TO_CONTENT; it.fit(mode); return { success:true, action:n, fitMode:n==='fit_content_to_frame'?'CONTENT_TO_FRAME':'FRAME_TO_CONTENT', oldBounds:old, ...meta(it), warnings:['Docs-verified; pending live UXP validation'] }; }
         if (n === 'apply_swatches') { it=resolveItem(args); const applied={}, warnings=[]; if(args.fillSwatch){ it.fillColor=named(doc.swatches,args.fillSwatch,'Swatch'); applied.fillSwatch=args.fillSwatch; } if(args.strokeSwatch){ it.strokeColor=named(doc.swatches,args.strokeSwatch,'Swatch'); applied.strokeSwatch=args.strokeSwatch; } if(args.strokeWeight!=null){ it.strokeWeight=args.strokeWeight; applied.strokeWeight=args.strokeWeight; } const text=safe(()=>it.texts.item(0)); if(text && text.isValid!==false){ if(args.textFillSwatch){ text.fillColor=named(doc.swatches,args.textFillSwatch,'Swatch'); applied.textFillSwatch=args.textFillSwatch; } if(args.textStrokeSwatch){ text.strokeColor=named(doc.swatches,args.textStrokeSwatch,'Swatch'); applied.textStrokeSwatch=args.textStrokeSwatch; } } else if(args.textFillSwatch || args.textStrokeSwatch) warnings.push('Text swatch requested but object has no text content'); return { success:true, action:n, applied, ...meta(it), warnings }; }
         if (n === 'apply_styles') { it=resolveItem(args); const applied={}, warnings=[]; const clear=args.clearOverrides===true; const text=safe(()=>it.texts.item(0)); if(args.paragraphStyle){ const s=named(doc.paragraphStyles,args.paragraphStyle,'Paragraph style'); if(text && text.isValid!==false){ if(text.applyParagraphStyle) text.applyParagraphStyle(s, clear); else text.appliedParagraphStyle=s; applied.paragraphStyle=args.paragraphStyle; } else warnings.push('Paragraph style requested but object has no text content'); } if(args.characterStyle){ const s=named(doc.characterStyles,args.characterStyle,'Character style'); if(text && text.isValid!==false){ if(text.applyCharacterStyle) text.applyCharacterStyle(s); else text.appliedCharacterStyle=s; applied.characterStyle=args.characterStyle; } else warnings.push('Character style requested but object has no text content'); } if(args.objectStyle){ const s=named(doc.objectStyles,args.objectStyle,'Object style'); if(it.applyObjectStyle) it.applyObjectStyle(s, clear, false); else it.appliedObjectStyle=s; applied.objectStyle=args.objectStyle; } return { success:true, action:n, applied, clearOverrides:clear, ...meta(it), warnings }; }
         if (n === 'group_items') { const items=resolveItems(args); const parent=safe(()=>items[0].parentPage, null) || safe(()=>items[0].parent, null) || doc; const g=parent.groups.add(items); if(args.name) g.name=args.name; if(args.label) writeLabel(g,args.label); return { success:true, action:n, group:meta(g), childIds:items.map(x=>safe(()=>x.id)), warnings:['Plain item arrays/common parent are pending live UXP validation'] }; }
         if (n === 'ungroup_items') { it=resolveItem(args); const kids=arr(it.allPageItems||[], x=>safe(()=>x.id)); it.ungroup(); return { success:true, action:n, objectId:args.objectId||null, childIds:kids, warnings:['Pending live UXP validation'] }; }
-        if (n === 'align_items') { const { AlignOptions, AlignDistributeBounds } = require('indesign'); const items=resolveItems(args); const before=items.map(x=>({objectId:safe(()=>x.id), bounds:safe(()=>x.geometricBounds)})); const alignMap={left:'LEFT_EDGES',right:'RIGHT_EDGES',top:'TOP_EDGES',bottom:'BOTTOM_EDGES',centerX:'HORIZONTAL_CENTERS',centerY:'VERTICAL_CENTERS'}; const boundsMap={page:'PAGE_BOUNDS',spread:'SPREAD_BOUNDS',selection:'ITEM_BOUNDS',items:'ITEM_BOUNDS',referenceObject:'KEY_OBJECT'}; const opt=AlignOptions[alignMap[args.mode]||args.mode]; const bound=AlignDistributeBounds[boundsMap[args.alignTo]||args.bounds||'ITEM_BOUNDS']; const ref=args.referenceObjectId?itemById(args.referenceObjectId):undefined; doc.align(items,opt,bound,ref); return { success:true, action:n, mode:args.mode, alignTo:args.alignTo||'items', before, after:items.map(x=>({objectId:safe(()=>x.id), bounds:safe(()=>x.geometricBounds)})), warnings:['Native align args are pending live UXP validation'] }; }
-        if (n === 'distribute_items') { const { DistributeOptions, AlignDistributeBounds } = require('indesign'); const items=resolveItems(args); const before=items.map(x=>({objectId:safe(()=>x.id), bounds:safe(()=>x.geometricBounds)})); const distMap={horizontal:'HORIZONTAL_SPACE',vertical:'VERTICAL_SPACE',left:'LEFT_EDGES',right:'RIGHT_EDGES',top:'TOP_EDGES',bottom:'BOTTOM_EDGES',centerX:'HORIZONTAL_CENTERS',centerY:'VERTICAL_CENTERS'}; const boundsMap={page:'PAGE_BOUNDS',spread:'SPREAD_BOUNDS',selection:'ITEM_BOUNDS',items:'ITEM_BOUNDS'}; const opt=DistributeOptions[distMap[args.axis]||args.mode||args.axis]; const bound=AlignDistributeBounds[boundsMap[args.within]||args.bounds||'ITEM_BOUNDS']; doc.distribute(items,opt,bound,args.fixedSpacing!=null,args.fixedSpacing||0); return { success:true, action:n, axis:args.axis, before, after:items.map(x=>({objectId:safe(()=>x.id), bounds:safe(()=>x.geometricBounds)})), warnings:['Native distribute args are pending live UXP validation'] }; }
+    `;
+}
+
+function buildLabelScript() {
+    return `
+        if (n === 'label_object') { it=resolveItem(args); const label=args.merge===false?args.label:{...readLabel(it),...(args.label||{})}; writeLabel(it,label); return { success:true, objectId:safe(()=>it.id), label }; }
+        if (n === 'get_object_label') { it=resolveItem(args); return { success:true, objectId:safe(()=>it.id), label:readLabel(it) }; }
+        if (n === 'find_objects_by_label' || n === 'list_named_objects') { const query=args.labelQuery||args; const hits=arr(doc.allPageItems||doc.pageItems,(x)=>({...meta(x),label:readLabel(x)})).filter(x=>(args.includeHidden || x.visible!==false) && (!args.namePrefix || String(x.name||'').startsWith(args.namePrefix)) && Object.keys(query).every(k=>['labelQuery','includeHidden','namePrefix','pageIndex'].includes(k) || query[k]==null || x.label?.[k]===query[k])); return { success:true, objects:hits }; }
+    `;
+}
+
+function buildAlignDistributeScript() {
+    return `
+        if (n === 'align_items') { const { AlignOptions, AlignDistributeBounds } = require('indesign'); const items=resolveItems(args); const before=items.map(x=>({objectId:safe(()=>x.id), bounds:safe(()=>x.geometricBounds)})); const alignMap={left:'LEFT_EDGES',right:'RIGHT_EDGES',top:'TOP_EDGES',bottom:'BOTTOM_EDGES',centerX:'HORIZONTAL_CENTERS',centerY:'VERTICAL_CENTERS'}; const boundsMap={page:'PAGE_BOUNDS',spread:'SPREAD_BOUNDS',selection:'ITEM_BOUNDS',itemsBoundingBox:'ITEM_BOUNDS',referenceObject:'KEY_OBJECT'}; const opt=AlignOptions[alignMap[args.mode]||args.mode]; const bound=AlignDistributeBounds[boundsMap[args.alignTo]||'ITEM_BOUNDS']; const ref=args.referenceObjectId?itemById(args.referenceObjectId):undefined; doc.align(items,opt,bound,ref); return { success:true, action:n, mode:args.mode, alignTo:args.alignTo||'itemsBoundingBox', before, after:items.map(x=>({objectId:safe(()=>x.id), bounds:safe(()=>x.geometricBounds)})), warnings:['Legacy native align fallback; deterministic handler should be preferred'] }; }
+        if (n === 'distribute_items') { const { DistributeOptions, AlignDistributeBounds } = require('indesign'); const items=resolveItems(args); const before=items.map(x=>({objectId:safe(()=>x.id), bounds:safe(()=>x.geometricBounds)})); const distMap={horizontal:'HORIZONTAL_SPACE',vertical:'VERTICAL_SPACE'}; const boundsMap={page:'PAGE_BOUNDS',spread:'SPREAD_BOUNDS',itemsBoundingBox:'ITEM_BOUNDS'}; const opt=DistributeOptions[distMap[args.axis]||args.mode||args.axis]; const bound=AlignDistributeBounds[boundsMap[args.within]||'ITEM_BOUNDS']; doc.distribute(items,opt,bound,args.fixedSpacing!=null,args.fixedSpacing||0); return { success:true, action:n, axis:args.axis, before, after:items.map(x=>({objectId:safe(()=>x.id), bounds:safe(()=>x.geometricBounds)})), warnings:['Legacy native distribute fallback; deterministic handler should be preferred'] }; }
+    `;
+}
+
+function layoutAndLabels(name) {
+    return `
+        const n = ${q(name)};
+        let it, old;
+        ${buildCreateObjectScript()}
+        ${buildGeometryScript()}
+        ${buildStyleScript()}
+        ${buildLabelScript()}
+        ${buildAlignDistributeScript()}
         if (n === 'create_reference_underlay' || n === 'hide_reference_underlay' || n === 'remove_reference_underlay') return { success:false, error:n+' should have been handled before generic template dispatch.' };
         return { success:false, error:'Template tool not implemented: '+n };
     `;

@@ -41,6 +41,22 @@ These tools have best-effort UXP snippets, but they are not complete until teste
 - `export_page_preview`
 - `export_spread_preview`
 - `create_page`
+- `create_derivative_page`
+- `duplicate_items_to_page`
+- `create_text_slot`
+- `create_image_slot`
+- `fit_text_to_frame`
+- `export_derivative_preview`
+- `inspect_derivative`
+- `apply_layout_recipe`
+- `replace_image_in_frame`
+- `update_text_slot`
+- `move_resize_items`
+- `create_vector_motif`
+- `inspect_layout_grid`
+- `analyze_design_system`
+- `compare_derivative_state`
+- `run_derivative_checks`
 - `duplicate_page`
 - `create_text_frame`
 - `create_image_frame` as an empty rectangle placeholder only
@@ -91,7 +107,7 @@ Known risks in this group:
 - Style and swatch application methods are docs-verified only; they still need live UXP validation for text-frame style behavior, object styles, and built-in swatch names.
 - `place_image` validates paths locally under `assets/` or `input/`, then uses docs-verified `frame.place(path)` and optional fitting; path-string placement still needs live UXP validation.
 - Group and ungroup methods are docs-verified only; item-array behavior and common-parent requirements still need live UXP validation.
-- Native align/distribute calls are docs-verified only; enum names and plain-array item arguments still need live UXP validation.
+- Deterministic align/distribute and derivative-layout flows now run through bounds math locally, but still need live UXP validation on real page items, grouped objects, and spread/page bounds.
 - Reference underlay layer/image methods are docs-verified only; layer printable/lock behavior and path-string placement still need live UXP validation.
 
 ## Not implemented yet
@@ -106,6 +122,7 @@ No registered template-generation tools intentionally return not-implemented aft
 - Template active-document guard now normalizes UXP file entries through `nativePath` / `fsName`.
 - Preview export validates page/spread indexes and sets image export page ranges/resolution where available.
 - Template layout tools now do basic positive-bounds validation, `mm` to `pt` conversion, create-time style/swatch basics, optional image placement for `create_image_frame`, semantic name rejection for unsafe characters, and the documented `REFERENCE_UNDERLAY` default layer name.
+- Derivative page/slot/recipe/check helpers now persist manifest state, deterministic preview naming, and inspection snapshots locally.
 
 Still pending: live Mac/InDesign retest after deployment and deeper fixture-driven completion of every optional inspection/preflight field.
 
@@ -123,7 +140,7 @@ Still pending: live Mac/InDesign retest after deployment and deeper fixture-driv
    - layer non-printing/locked/visible behavior for reference underlays,
    - link/font/preflight status fields.
 3. Replace registered-failing tools with real guarded UXP snippets.
-4. Add minimal live assertions to `tests/test-template-mvp-flow.js` as each family is proven.
+4. Run `tests/test-template-mvp-flow.js` with `RUN_TEMPLATE_LIVE=1` against a real `.indd` fixture and real asset file to prove the end-to-end derivative flow.
 5. Run the full three-derivative flow on a real `.indd` fixture and fix DOM/version differences.
 
 ## Documentation sources to use next

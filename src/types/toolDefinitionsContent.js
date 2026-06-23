@@ -7,7 +7,7 @@ export const contentToolDefinitions = [
     // =================== TEXT MANAGEMENT ===================
     {
         name: 'create_text_frame',
-        description: 'Create a text frame. When a template workspace is active, this is routed through the workspace-safe template implementation using pageIndex, bounds, text, name, and label.',
+        description: 'Create a text frame. For template generation, prefer create_text_slot. When a template workspace is active, this can still route through the workspace-safe template implementation using pageIndex, bounds, text, name, and label, while legacy clients may continue passing content.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -28,7 +28,7 @@ export const contentToolDefinitions = [
                 paragraphStyle: { type: 'string', description: 'Paragraph style name to apply during creation' },
                 characterStyle: { type: 'string', description: 'Character style name to apply during creation' },
             },
-            required: ['content'],
+            required: [],
         },
     },
     {
