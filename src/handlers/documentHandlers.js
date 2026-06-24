@@ -2,7 +2,7 @@
  * Comprehensive Document management handlers
  * Merged from documentHandlers.js and documentAdvancedHandlers.js
  */
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { ScriptExecutor } from '../core/scriptExecutor.js';
 import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
 import { sessionManager } from '../core/sessionManager.js';
@@ -181,14 +181,13 @@ export class DocumentHandlers {
      */
     static async openDocument(args) {
         const { filePath } = args;
+        if (!filePath) return formatErrorResponse('filePath is required', 'Open Document');
+        if (!existsSync(filePath)) return formatErrorResponse(`File not found: ${filePath}`, 'Open Document');
 
         const code = `
-            const file = new File(${JSON.stringify(filePath)});
-            if (!file.exists) {
-                return { success: false, error: 'File not found: ' + ${JSON.stringify(filePath)} };
-            }
-            await app.open(file);
-            return { success: true, message: 'Document opened: ' + ${JSON.stringify(filePath)} };
+            const filePath = ${JSON.stringify(filePath)};
+            const doc = await app.open(filePath);
+            return { success: true, documentName: doc.name, path: filePath };
         `;
 
         const result = await ScriptExecutor.executeViaUXP(code);
@@ -211,7 +210,16 @@ export class DocumentHandlers {
             }
             const doc = app.activeDocument;
             ${filePath
-                ? `await doc.save(new File(${JSON.stringify(filePath)}));`
+                ? `
+            try {
+                await doc.save(${JSON.stringify(filePath)});
+            } catch (error) {
+                const message = String(error && error.message || error || '');
+                if (/unsupported|not supported|save\(/i.test(message)) {
+                    return { success: false, error: 'Generic save-as by path is unsupported in this UXP bridge. Use template save_working_copy/save_version for template workflows.' };
+                }
+                return { success: false, error: message || 'Failed to save document' };
+            }`
                 : `
             let savedPath = null;
             try { const fp = await doc.filePath; savedPath = fp ? String(fp) : null; } catch(e) {}

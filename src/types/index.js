@@ -13,10 +13,9 @@ import { pageItemGroupToolDefinitions } from './toolDefinitionsPageItemGroup.js'
 import { masterSpreadToolDefinitions } from './toolDefinitionsMasterSpread.js';
 import { spreadToolDefinitions } from './toolDefinitionsSpread.js';
 import { layerToolDefinitions } from './toolDefinitionsLayer.js';
-import { templateToolDefinitions } from './toolDefinitionsTemplate.js';
+import { templateToolDefinitions, templateToolProfileNames } from './toolDefinitionsTemplate.js';
 
-// Combine all tool definitions into a single array
-export const allToolDefinitions = [
+export const genericOnlyDefinitions = [
     ...pageToolDefinitions,
     ...contentToolDefinitions,
     ...documentToolDefinitions,
@@ -27,8 +26,16 @@ export const allToolDefinitions = [
     ...masterSpreadToolDefinitions,
     ...spreadToolDefinitions,
     ...layerToolDefinitions,
-    ...templateToolDefinitions,
 ];
+
+export const allToolDefinitions = [...new Map([...genericOnlyDefinitions, ...templateToolDefinitions].map((tool) => [tool.name, tool])).values()];
+
+export function getToolDefinitionsForProfile(profile = process.env.INDESIGN_TOOL_PROFILE || 'template') {
+    if (profile === 'template') return templateToolDefinitions;
+    if (profile === 'generic') return genericOnlyDefinitions;
+    if (profile === 'all') return allToolDefinitions;
+    throw new Error(`Unknown INDESIGN_TOOL_PROFILE: ${profile}`);
+}
 
 // Export individual modules for specific use cases
 export { pageToolDefinitions } from './toolDefinitionsPage.js';

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ScriptExecutor } from '../core/scriptExecutor.js';
 import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
-import { initWorkspace, loadWorkspace, getWorkspace, saveWorkspace, nextVersionId, upsertDerivative, upsertDerivativePage } from '../core/workspaceState.js';
+import { initWorkspace, attachWorkspace, loadWorkspace, getWorkspace, saveWorkspace, nextVersionId, upsertDerivative, upsertDerivativePage, fileStatEvidence, validateWorkspaceFiles } from '../core/workspaceState.js';
 import { assertWorkspacePath, safeBasename } from '../utils/pathGuard.js';
 import { imageInfo } from '../utils/imageInfo.js';
 
@@ -15,6 +15,32 @@ function response(promise, op) {
 function q(value) { return JSON.stringify(value); }
 
 function nowIso() { return new Date().toISOString(); }
+
+function workspaceAttachError() {
+    return 'Template workspace is not attached. Call attach_template_workspace({ workspaceRoot }) or init_template_workspace(...) first.';
+}
+
+function workspaceFolders(manifest) {
+    return Object.fromEntries(['input', 'work', 'previews', 'exports', 'versions', 'logs', 'assets'].map((dir) => [dir, fs.existsSync(path.join(manifest.workspaceRoot, dir))]));
+}
+
+function workspaceSummary(manifest, extra = {}) {
+    return {
+        success: true,
+        workspaceRoot: manifest.workspaceRoot,
+        workingCopyPath: manifest.workingCopyPath,
+        inputCopyPath: manifest.inputCopyPath,
+        folders: workspaceFolders(manifest),
+        versionCount: manifest.versions?.length || 0,
+        previewCount: manifest.previews?.length || 0,
+        derivatives: manifest.derivatives || [],
+        ...extra
+    };
+}
+
+function unwrapToolResult(toolResponse) {
+    return toolResponse?.result ?? toolResponse;
+}
 
 function toPtNumber(value, unit = 'pt') {
     const num = Number(value);
@@ -79,7 +105,7 @@ function shallowMergeLabel(base, patch) {
 }
 
 function activeGuardCode(body) {
-    const { workingCopyPath } = getWorkspace();
+    const { workingCopyPath } = loadWorkspace();
     return `
         const expected = ${q(path.resolve(workingCopyPath))};
         if (!app.documents || app.documents.length === 0) return { success:false, error:'No document open' };
@@ -94,7 +120,8 @@ function activeGuardCode(body) {
     `;
 }
 
-async function runGuarded(body) {
+async function runGuarded(body, options = {}) {
+    await TemplateHandlers.ensureTemplateReady(options);
     const result = await ScriptExecutor.executeViaUXP(activeGuardCode(body));
     if (result?.success === false) throw new Error(result.error || 'Template tool failed');
     return result;
@@ -118,17 +145,26 @@ function jsHelpers() {
         function readLabel(it){ let raw=''; try { raw = it.extractLabel ? it.extractLabel(${q(LABEL_KEY)}) : it.label; } catch(e) {} try { return raw ? JSON.parse(raw) : {}; } catch(e){ return { rawLabel: raw }; } }
         function writeLabel(it, label){ const raw=JSON.stringify(label); if (it.insertLabel) it.insertLabel(${q(LABEL_KEY)}, raw); else it.label=raw; }
         function cleanName(name){ if (!name) return name; if (!/^[a-z0-9]+(?:_[a-z0-9]+)*__(?:[a-z0-9]+_?)*__[a-z0-9_]+$/.test(name) && /[\\/"'\x00-\x1f]/.test(name)) throw new Error('Invalid semantic object name'); return name; }
-        function toPt(v, unit){ return unit === 'mm' ? v * 2.8346456693 : v; }
-        function boundsInPt(bounds, unit){ if (!Array.isArray(bounds) || bounds.length !== 4) throw new Error('bounds must be [top,left,bottom,right]'); const b=bounds.map(Number); if (b.some(x=>!Number.isFinite(x))) throw new Error('bounds must contain finite numbers'); if (b[2] <= b[0] || b[3] <= b[1]) throw new Error('bounds must have positive width and height'); return b.map(x=>toPt(x, unit || 'pt')); }
+        function toPt(v, unit){ const n = Number(v); if (!Number.isFinite(n)) throw new Error('Expected finite number'); return unit === 'mm' ? n * 2.8346456693 : n; }
+        function boundsInPt(bounds, unit){ if (!Array.isArray(bounds) || bounds.length !== 4) throw new Error('bounds must be [top,left,bottom,right]'); const b=bounds.map((x)=>toPt(x, unit || 'pt')); if (b[2] <= b[0] || b[3] <= b[1]) throw new Error('bounds must have positive width and height'); return b; }
         function roundMaybe(v, step){ return step ? Math.round(v / step) * step : v; }
         function widthOf(b){ return b[3] - b[1]; }
         function heightOf(b){ return b[2] - b[0]; }
         function centerXOf(b){ return (b[1] + b[3]) / 2; }
         function centerYOf(b){ return (b[0] + b[2]) / 2; }
         function pageIndexOf(item){ const parentPage = safe(()=>item.parentPage, null); if (!parentPage) return null; for (let i=0;i<len(doc.pages);i++) if (safe(()=>at(doc.pages,i).id) === safe(()=>parentPage.id)) return i; return null; }
+        function collectionIndexById(coll, obj){ const id = safe(()=>obj && obj.id, null); if (id == null) return null; for (let i=0;i<len(coll);i++) if (safe(()=>at(coll,i).id, null) === id) return i; return null; }
         function pageByIndex(index){ if (index == null || index < 0 || index >= len(doc.pages)) throw new Error('pageIndex out of range'); return at(doc.pages, index); }
         function pageBounds(index){ return clone(pageByIndex(index).bounds); }
         function spreadBoundsForPage(index){ const page = pageByIndex(index); const spread = safe(()=>page.parent, null); if (!spread) return clone(page.bounds); const pages = arr(spread.pages, (p)=>safe(()=>p.bounds)); const top = Math.min.apply(null, pages.map((b)=>b[0])); const left = Math.min.apply(null, pages.map((b)=>b[1])); const bottom = Math.max.apply(null, pages.map((b)=>b[2])); const right = Math.max.apply(null, pages.map((b)=>b[3])); return [top,left,bottom,right]; }
+        function writableLayer(name) { const layerName = name || 'AGENT_WORK'; let layer = safe(() => doc.layers.itemByName(layerName), null); if (!layer || layer.isValid === false) layer = doc.layers.add({ name: layerName }); layer.visible = true; layer.locked = false; return layer; }
+        function rectArea(b) { return Math.max(0, b[3] - b[1]) * Math.max(0, b[2] - b[0]); }
+        function intersectBounds(a, b) { const top = Math.max(a[0], b[0]); const left = Math.max(a[1], b[1]); const bottom = Math.min(a[2], b[2]); const right = Math.min(a[3], b[3]); if (bottom <= top || right <= left) return null; return [top, left, bottom, right]; }
+        function pageLocalBoundsToDocumentBounds(pageIndex, bounds, unit) { const page = pageByIndex(pageIndex); const pb = clone(page.bounds); const lb = boundsInPt(bounds, unit || 'pt'); return { localBounds: lb, pageBounds: pb, documentBounds: [pb[0] + lb[0], pb[1] + lb[1], pb[0] + lb[2], pb[1] + lb[3]] }; }
+        function resolveBoundsForPage(args, fallbackPageIndex) { const pageIndex = args.pageIndex != null ? args.pageIndex : fallbackPageIndex; if (pageIndex == null) throw new Error('pageIndex is required'); const page = pageByIndex(pageIndex); const pb = clone(page.bounds); const rawBounds = boundsInPt(args.bounds, args.unit || 'pt'); const coordinateSpace = args.coordinateSpace || 'page'; if (coordinateSpace === 'document') return { coordinateSpace: 'document', localBounds: null, pageBounds: pb, documentBounds: rawBounds, pageIndex }; if (coordinateSpace !== 'page') throw new Error('coordinateSpace must be "page" or "document"'); return { coordinateSpace: 'page', ...pageLocalBoundsToDocumentBounds(pageIndex, args.bounds, args.unit || 'pt'), pageIndex }; }
+        function pageLocalPointToDocumentPoint(pageIndex, point, unit) { if (!Array.isArray(point) || point.length !== 2) throw new Error('point must be [x,y]'); const page = pageByIndex(pageIndex); const pb = clone(page.bounds); const x = toPt(point[0], unit || 'pt'); const y = toPt(point[1], unit || 'pt'); return { localPoint: [x, y], pageBounds: pb, documentPoint: [pb[1] + x, pb[0] + y] }; }
+        function resolvePointForPage(args, point, fallbackPageIndex) { const pageIndex = args.pageIndex != null ? args.pageIndex : fallbackPageIndex; if (pageIndex == null) throw new Error('pageIndex is required'); const coordinateSpace = args.coordinateSpace || 'page'; if (coordinateSpace === 'document') { const x = toPt(point[0], args.unit || 'pt'); const y = toPt(point[1], args.unit || 'pt'); return { coordinateSpace: 'document', localPoint: null, pageBounds: clone(pageByIndex(pageIndex).bounds), documentPoint: [x, y], pageIndex }; } if (coordinateSpace !== 'page') throw new Error('coordinateSpace must be "page" or "document"'); return { coordinateSpace: 'page', ...pageLocalPointToDocumentPoint(pageIndex, point, args.unit || 'pt'), pageIndex }; }
+        function validateBoundsOnPage(documentBounds, pageBounds, args) { const warnings = []; const reject = args.rejectOutOfPageBounds !== false; const maxOutsideRatio = args.maxOutsidePageRatio == null ? 0.25 : Number(args.maxOutsidePageRatio); if (!Array.isArray(documentBounds) || documentBounds.length !== 4) throw new Error('documentBounds must be [top,left,bottom,right]'); if (documentBounds.some((v) => !Number.isFinite(Number(v)))) throw new Error('documentBounds must contain finite numbers'); if (documentBounds[2] <= documentBounds[0] || documentBounds[3] <= documentBounds[1]) throw new Error('documentBounds must have positive width and height'); const pageWidth = pageBounds[3] - pageBounds[1]; const pageHeight = pageBounds[2] - pageBounds[0]; const itemWidth = documentBounds[3] - documentBounds[1]; const itemHeight = documentBounds[2] - documentBounds[0]; if (itemWidth < 0.5 || itemHeight < 0.5) throw new Error('Object bounds are implausibly small'); if (itemWidth > pageWidth * 3 || itemHeight > pageHeight * 3) throw new Error('Object bounds are implausibly large relative to page'); const intersection = intersectBounds(documentBounds, pageBounds); if (!intersection) { if (reject) throw new Error('Object bounds do not intersect target page'); warnings.push('Object bounds do not intersect target page'); } const itemArea = rectArea(documentBounds); const insideArea = intersection ? rectArea(intersection) : 0; const outsideRatio = itemArea > 0 ? 1 - insideArea / itemArea : 1; if (outsideRatio > maxOutsideRatio) { const msg = 'Object is mostly outside target page: outsideRatio=' + outsideRatio; if (reject) throw new Error(msg); warnings.push(msg); } return { ok: warnings.length === 0, outsideRatio, intersectsPage: !!intersection, warnings }; }
         function setBoundsRaw(item, bounds){ item.geometricBounds = bounds; return clone(item.geometricBounds); }
         function setBoundsSmart(item, nextBounds, options){ const current = clone(item.geometricBounds); let target = clone(nextBounds); const preserveAspectRatio = !!(options && options.preserveAspectRatio); const preserveCenter = !!(options && options.preserveCenter); const anchor = options && options.anchor || 'topLeft'; const roundTo = options && options.roundTo || null; if (preserveCenter) {
                 const w = widthOf(target), h = heightOf(target), cx = centerXOf(current), cy = centerYOf(current);
@@ -160,6 +196,64 @@ function jsHelpers() {
 }
 
 export class TemplateHandlers {
+    static async ensureTemplateReady(options = {}) {
+        const { allowSwitchDocument = false, openIfMissing = true } = options;
+        let manifest;
+        try {
+            manifest = validateWorkspaceFiles(loadWorkspace());
+        } catch {
+            throw new Error(workspaceAttachError());
+        }
+        assertWorkspacePath(manifest.workingCopyPath, { kind: 'work', manifest });
+        const result = await ScriptExecutor.executeViaUXP(`
+            const expected = ${q(path.resolve(manifest.workingCopyPath))};
+            const allowSwitchDocument = ${q(allowSwitchDocument)};
+            const openIfMissing = ${q(openIfMissing)};
+            function nativePath(v) { try { return v ? String(v.nativePath || v.fsName || v) : ''; } catch(e) { return ''; } }
+            function joinDocPath(basePath, docName) { const base = String(basePath || '').replace(/[\\/]+$/, ''); if (!base) return ''; return base + '/' + docName; }
+            function normalizeDocPath(rawPath, docName) { const base = nativePath(rawPath); const name = String(docName || ''); if (!base) return ''; if (name && !/\.indd$/i.test(base)) return joinDocPath(base, name); return base; }
+            async function docPath(doc) { return normalizeDocPath(await doc.filePath, doc.name) || normalizeDocPath(await doc.fullName, doc.name) || null; }
+            let activeDocumentPath = null;
+            let opened = false;
+            let reusedOpenDocument = false;
+            let switchedActiveDocument = false;
+            let workingDoc = null;
+            for (let i = 0; i < app.documents.length; i++) {
+                const candidate = app.documents.item ? app.documents.item(i) : app.documents[i];
+                const candidatePath = await docPath(candidate);
+                if (candidatePath === expected) {
+                    workingDoc = candidate;
+                    break;
+                }
+            }
+            if (app.documents.length === 0) {
+                if (!openIfMissing) return { success: false, error: 'No document open and openIfMissing=false', workingCopyPath: expected };
+                workingDoc = await app.open(expected);
+                opened = true;
+            } else {
+                const active = app.activeDocument || (app.documents.item ? app.documents.item(0) : app.documents[0]);
+                activeDocumentPath = active ? await docPath(active) : null;
+                if (activeDocumentPath === expected) {
+                    workingDoc = active;
+                    reusedOpenDocument = true;
+                } else if (workingDoc) {
+                    app.activeDocument = workingDoc;
+                    switchedActiveDocument = true;
+                    reusedOpenDocument = true;
+                } else if (allowSwitchDocument && openIfMissing) {
+                    workingDoc = await app.open(expected);
+                    opened = true;
+                } else {
+                    return { success: false, error: 'Active document is not workspace working copy', activeDocumentPath, workingCopyPath: expected };
+                }
+            }
+            if (workingDoc && app.activeDocument !== workingDoc) app.activeDocument = workingDoc;
+            return { success: true, workingCopyPath: expected, activeDocumentPath: await docPath(app.activeDocument), opened, reusedOpenDocument, switchedActiveDocument };
+        `);
+        if (result?.success === false) throw new Error(result.error || 'Template readiness failed');
+        return result;
+    }
+
     static inspectionLogPath(manifest = loadWorkspace()) {
         return assertWorkspacePath(path.join(manifest.workspaceRoot, 'logs', 'derivative_inspections.jsonl'), { kind: 'logs', manifest }).path;
     }
@@ -186,6 +280,30 @@ export class TemplateHandlers {
         throw new Error('derivativeId or pageIndex is required');
     }
 
+    static async createPageRaw(args = {}) { return this.uxpTool('create_page', args); }
+    static async createTextFrameRaw(args = {}) { return this.uxpTool('create_text_frame', args); }
+    static async createImageFrameRaw(args = {}) { return this.uxpTool('create_image_frame', args); }
+    static async createShapeRaw(args = {}) { return this.uxpTool('create_shape', args); }
+    static async createLineRaw(args = {}) { return this.uxpTool('create_line', args); }
+    static async exportPreviewRaw(kind, args = {}) { return this.exportPreview(kind, args); }
+    static async inspectPageItemsRaw(args = {}) { return this.uxpTool('inspect_page_items_v2', args); }
+
+    static async createDerivativePageMarker(args = {}) {
+        const { derivativeId, pageIndex } = args;
+        return runGuarded(`${jsHelpers()} const args=${q(args)};
+            const page = pageByIndex(args.pageIndex);
+            const resolved = resolveBoundsForPage({ pageIndex: args.pageIndex, bounds: [0,0,1,1], unit: 'pt', coordinateSpace: 'page', rejectOutOfPageBounds: false, maxOutsidePageRatio: 1 });
+            let layer = safe(() => doc.layers.itemByName('MCP_METADATA'), null);
+            if (!layer || layer.isValid === false) layer = writableLayer('MCP_METADATA');
+            layer.printable = false;
+            const marker = page.rectangles.add({ geometricBounds: resolved.documentBounds, itemLayer: layer });
+            marker.name = String(args.derivativeId) + '__page_marker';
+            marker.nonprinting = true;
+            writeLabel(marker, { derivativeId: args.derivativeId, role: 'page_marker', source: 'mcp', nonprinting: true, metadata: true });
+            return { success: true, objectId: safe(() => marker.id), name: safe(() => marker.name), pageIndex: args.pageIndex };
+        `);
+    }
+
     static async handle(name, args = {}) {
         if (this[name]) return this[name](args);
         return response(this.uxpTool(name, args), name);
@@ -195,35 +313,22 @@ export class TemplateHandlers {
         return response(initWorkspace({ originalSourcePath: args.originalInddPath, workspaceRoot: args.workspaceRoot, overwriteExistingWorkspace: args.overwriteExistingWorkspace }), 'init_template_workspace');
     }
 
+    static attach_template_workspace(args = {}) {
+        return response((async () => workspaceSummary(attachWorkspace(args.workspaceRoot)))(), 'attach_template_workspace');
+    }
+
     static copy_original_to_workspace(args = {}) {
         return response((async () => {
             if (args.originalInddPath && args.workspaceRoot) {
                 const manifest = initWorkspace({ originalSourcePath: args.originalInddPath, workspaceRoot: args.workspaceRoot, overwriteExistingWorkspace: args.overwriteExistingWorkspace });
-                return {
-                    success: true,
-                    workspaceRoot: manifest.workspaceRoot,
-                    inputCopyPath: path.join(manifest.workspaceRoot, 'input', 'base-copy.indd'),
-                    workingCopyPath: manifest.workingCopyPath,
-                    copied: true,
-                    verified: true
-                };
+                return workspaceSummary(manifest, { copied: true, verified: true });
             }
-            const manifest = loadWorkspace();
-            const inputCopyPath = path.join(manifest.workspaceRoot, 'input', 'base-copy.indd');
-            if (!fs.existsSync(manifest.workspaceRoot)) throw new Error('workspaceRoot does not exist');
-            if (!fs.existsSync(inputCopyPath)) throw new Error('Missing input/base-copy.indd');
-            if (!fs.existsSync(manifest.workingCopyPath)) throw new Error('Missing work/current.indd');
-            assertWorkspacePath(inputCopyPath, { kind: 'input', manifest });
-            assertWorkspacePath(manifest.workingCopyPath, { kind: 'work', manifest });
-            return {
-                success: true,
-                workspaceRoot: manifest.workspaceRoot,
-                inputCopyPath,
-                workingCopyPath: manifest.workingCopyPath,
-                copied: false,
-                verified: true,
-                originalSourcePath: manifest.originalSourcePath || null
-            };
+            if (args.workspaceRoot && !args.originalInddPath) {
+                const manifest = attachWorkspace(args.workspaceRoot);
+                return workspaceSummary(manifest, { copied: false, verified: true });
+            }
+            const manifest = validateWorkspaceFiles(loadWorkspace());
+            return workspaceSummary(manifest, { copied: false, verified: true, originalSourcePath: manifest.originalSourcePath || null });
         })(), 'copy_original_to_workspace');
     }
 
@@ -263,36 +368,24 @@ export class TemplateHandlers {
 
     static open_working_copy() {
         return response((async () => {
-            const m = loadWorkspace();
-            assertWorkspacePath(m.workingCopyPath, { kind: 'work', manifest: m });
-            return ScriptExecutor.executeViaUXP(`
-                const filePath = ${q(m.workingCopyPath)};
-                const expected = String(filePath).replace(/\\/g, '/');
-                function nativePath(v) { try { return v ? String(v.nativePath || v.fsName || v) : ''; } catch(e) { return ''; } }
-                function joinDocPath(basePath, docName) { const base = String(basePath || '').replace(/[\\/]+$/, ''); if (!base) return ''; return base + '/' + docName; }
-                function normalizeDocPath(rawPath, docName) {
-                    const base = nativePath(rawPath).replace(/\\/g, '/');
-                    const name = String(docName || '');
-                    if (!base) return '';
-                    if (name && !/\.indd$/i.test(base)) return joinDocPath(base, name);
-                    return base;
-                }
-                for (let i = 0; i < app.documents.length; i++) {
-                    const existing = app.documents[i];
-                    const existingPath = normalizeDocPath(await existing.filePath, existing.name) || normalizeDocPath(await existing.fullName, existing.name);
-                    if (existingPath === expected) {
-                        app.activeDocument = existing;
-                        return { success:true, documentName: existing.name, path: filePath, reusedOpenDocument: true };
-                    }
-                }
-                const doc = await app.open(filePath);
-                return { success:true, documentName: doc.name, path: filePath, reusedOpenDocument: false };
-            `);
+            const ready = await this.ensureTemplateReady({ allowSwitchDocument: true, openIfMissing: true });
+            return {
+                success: true,
+                documentName: path.basename(ready.workingCopyPath),
+                path: ready.workingCopyPath,
+                reusedOpenDocument: ready.reusedOpenDocument,
+                opened: ready.opened,
+                switchedActiveDocument: ready.switchedActiveDocument
+            };
         })(), 'open_working_copy');
     }
 
     static save_working_copy() {
-        return response(runGuarded('await doc.save(); return { success:true, path: expected };'), 'save_working_copy');
+        return response((async () => {
+            const manifest = loadWorkspace();
+            await runGuarded('await doc.save(); return { success:true, path: expected };');
+            return { success: true, ...fileStatEvidence(manifest.workingCopyPath) };
+        })(), 'save_working_copy');
     }
 
     static save_version(args = {}) {
@@ -303,9 +396,22 @@ export class TemplateHandlers {
             const versionPath = path.join(m.workspaceRoot, 'versions', `${versionId}.indd`);
             assertWorkspacePath(versionPath, { kind: 'versions', manifest: m });
             fs.copyFileSync(m.workingCopyPath, versionPath);
-            const rec = { versionId, path: versionPath, label: args.label || null, derivativeId: args.derivativeId || null, createdAt: new Date().toISOString(), source: 'save_version' };
+            const rec = {
+                versionId,
+                path: versionPath,
+                label: args.label || null,
+                derivativeId: args.derivativeId || null,
+                createdAt: new Date().toISOString(),
+                source: 'save_version',
+                sourceFile: fileStatEvidence(m.workingCopyPath),
+                versionFile: fileStatEvidence(versionPath)
+            };
             m.versions.push(rec); m.activeVersionId = versionId; saveWorkspace(m);
-            return rec;
+            if (args.derivativeId) {
+                const derivative = (m.derivatives || []).find((entry) => entry.derivativeId === args.derivativeId);
+                upsertDerivativePage(m, args.derivativeId, { versionIds: [...new Set([...(derivative?.versionIds || []), versionId])] });
+            }
+            return { success: true, versionId, label: rec.label, derivativeId: rec.derivativeId, source: rec.sourceFile, version: rec.versionFile };
         })(), 'save_version');
     }
 
@@ -368,13 +474,14 @@ export class TemplateHandlers {
             const manifest = loadWorkspace();
             const pageSize = derivativePageSize(args);
             const basePageIndex = args.basePageIndex ?? 0;
-            const created = await this.create_page({
+            const created = await this.createPageRaw({
                 pageWidth: pageSize.width,
                 pageHeight: pageSize.height,
                 unit: 'pt',
                 name: args.name,
                 derivativeId: args.derivativeId
             });
+            await this.createDerivativePageMarker({ derivativeId: args.derivativeId, pageIndex: created.pageIndex });
             let duplicatedMotifs = [];
             if (args.duplicateBaseMotifs) {
                 const dupe = await this.duplicate_items_to_page({
@@ -388,6 +495,10 @@ export class TemplateHandlers {
             }
             upsertDerivativePage(manifest, args.derivativeId, {
                 pageIndex: created.pageIndex,
+                pageId: created.pageId ?? null,
+                pageName: created.name || null,
+                pageBounds: created.pageBounds || null,
+                spreadIndex: created.spreadIndex ?? null,
                 name: args.name || created.name || null,
                 format: args.pageSize || 'custom',
                 pageSize,
@@ -398,10 +509,132 @@ export class TemplateHandlers {
                 success: true,
                 derivativeId: args.derivativeId,
                 pageIndex: created.pageIndex,
+                pageId: created.pageId ?? null,
+                pageName: created.name || null,
+                pageBounds: created.pageBounds || null,
+                spreadIndex: created.spreadIndex ?? null,
                 pageSize,
                 ...(duplicatedMotifs.length ? { duplicatedMotifs } : {})
             };
         })(), 'create_derivative_page');
+    }
+
+    static resolve_derivative_page(args = {}) {
+        return response((async () => {
+            const manifest = loadWorkspace();
+            const derivative = args.derivativeId ? this.resolveDerivativeRecord(manifest, args) : null;
+            const pageScan = await runGuarded(`${jsHelpers()} const args=${q(args)};
+                function pageRecord(page, resolvedBy, warnings){
+                    const spread = safe(() => page.parent, null);
+                    const bounds = clone(safe(() => page.bounds, null));
+                    return {
+                        success: true,
+                        pageIndex: collectionIndexById(doc.pages, page),
+                        pageId: safe(() => page.id, null),
+                        pageName: safe(() => page.name, null),
+                        pageBounds: bounds,
+                        pageSize: bounds ? { width: bounds[3] - bounds[1], height: bounds[2] - bounds[0], unit: 'pt' } : null,
+                        spreadIndex: spread ? collectionIndexById(doc.spreads, spread) : null,
+                        resolvedBy,
+                        warnings: warnings || []
+                    };
+                }
+                function pageLabel(page){
+                    let raw = '';
+                    try { raw = page.extractLabel ? page.extractLabel(${q(LABEL_KEY)}) : page.label; } catch(e) {}
+                    try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+                }
+                const targetDerivativeId = args.derivativeId || null;
+                const warnings = [];
+                let page = null;
+                if (${q(!!derivative)} && ${q(derivative?.pageId ?? null)} != null) {
+                    for (let i = 0; i < len(doc.pages); i++) {
+                        const candidate = at(doc.pages, i);
+                        if (safe(() => candidate.id, null) === ${q(derivative?.pageId ?? null)}) { page = candidate; break; }
+                    }
+                    if (page) return pageRecord(page, 'pageId', warnings);
+                }
+                if (targetDerivativeId) {
+                    for (let i = 0; i < len(doc.pages); i++) {
+                        const candidate = at(doc.pages, i);
+                        if (pageLabel(candidate).derivativeId === targetDerivativeId) return pageRecord(candidate, 'pageLabel', warnings);
+                    }
+                    const items = arr(doc.allPageItems || doc.pageItems, x => x);
+                    for (const item of items) {
+                        const label = readLabel(item);
+                        if (label.derivativeId === targetDerivativeId && label.role === 'page_marker') {
+                            const pp = safe(() => item.parentPage, null);
+                            if (pp) return pageRecord(pp, 'pageMarker', warnings);
+                        }
+                    }
+                    for (let i = 0; i < len(doc.pages); i++) {
+                        const candidate = at(doc.pages, i);
+                        if (${q(derivative?.pageName ?? null)} && safe(() => candidate.name, null) === ${q(derivative?.pageName ?? null)}) return pageRecord(candidate, 'pageName', warnings);
+                    }
+                    for (const item of arr(doc.allPageItems || doc.pageItems, x => x)) {
+                        const label = readLabel(item);
+                        if (label.derivativeId === targetDerivativeId) {
+                            const pp = safe(() => item.parentPage, null);
+                            if (pp) return pageRecord(pp, 'objectLabel', warnings);
+                        }
+                    }
+                }
+                if (args.pageIndex != null) {
+                    const candidate = pageByIndex(args.pageIndex);
+                    warnings.push('Resolved by pageIndex fallback only');
+                    return pageRecord(candidate, 'pageIndex', warnings);
+                }
+                throw new Error('Unable to resolve derivative page');
+            `);
+            const derivativeId = args.derivativeId || derivative?.derivativeId || null;
+            const warnings = [...(pageScan.warnings || [])];
+            if (derivativeId) {
+                if (derivative && derivative.pageIndex != null && derivative.pageIndex !== pageScan.pageIndex) {
+                    warnings.push(`Manifest pageIndex updated from ${derivative.pageIndex} to ${pageScan.pageIndex}`);
+                }
+                upsertDerivativePage(manifest, derivativeId, {
+                    pageIndex: pageScan.pageIndex,
+                    pageId: pageScan.pageId,
+                    pageName: pageScan.pageName,
+                    pageBounds: pageScan.pageBounds,
+                    spreadIndex: pageScan.spreadIndex,
+                    pageSize: pageScan.pageSize
+                });
+            }
+            return { success: true, derivativeId, ...pageScan, warnings };
+        })(), 'resolve_derivative_page');
+    }
+
+    static inspect_page_geometry(args = {}) {
+        return response((async () => {
+            const resolved = args.derivativeId ? unwrapToolResult(await this.resolve_derivative_page({ derivativeId: args.derivativeId })) : { pageIndex: args.pageIndex };
+            return runGuarded(`${jsHelpers()} const args=${q({ pageIndex: resolved.pageIndex })};
+                const page = pageByIndex(args.pageIndex);
+                const spread = safe(() => page.parent, null);
+                const spreadPages = arr(safe(() => spread.pages, []), (p) => clone(safe(() => p.bounds, null))).filter(Boolean);
+                const spreadBounds = spreadPages.length ? [Math.min(...spreadPages.map((b) => b[0])), Math.min(...spreadPages.map((b) => b[1])), Math.max(...spreadPages.map((b) => b[2])), Math.max(...spreadPages.map((b) => b[3]))] : clone(page.bounds);
+                const bounds = clone(page.bounds);
+                const margins = safe(() => page.marginPreferences, null);
+                const docUnits = safe(() => doc.viewPreferences, null);
+                return {
+                    success: true,
+                    pageIndex: args.pageIndex,
+                    pageId: safe(() => page.id, null),
+                    pageName: safe(() => page.name, null),
+                    pageBounds: bounds,
+                    pageSize: { width: bounds[3] - bounds[1], height: bounds[2] - bounds[0], unit: 'pt' },
+                    spreadIndex: spread ? collectionIndexById(doc.spreads, spread) : null,
+                    spreadBounds,
+                    rulerOrigin: safe(() => String(docUnits.rulerOrigin), null),
+                    facingPages: safe(() => doc.documentPreferences.facingPages, null),
+                    marginPreferences: margins ? { top: safe(() => margins.top, 0), bottom: safe(() => margins.bottom, 0), left: safe(() => margins.left, 0), right: safe(() => margins.right, 0), columnCount: safe(() => margins.columnCount, 1), columnGutter: safe(() => margins.columnGutter, 0) } : null,
+                    bleed: { top: safe(() => doc.documentPreferences.documentBleedTopOffset, null), bottom: safe(() => doc.documentPreferences.documentBleedBottomOffset, null), insideOrLeft: safe(() => doc.documentPreferences.documentBleedInsideOrLeftOffset, null), outsideOrRight: safe(() => doc.documentPreferences.documentBleedOutsideOrRightOffset, null) },
+                    slug: { top: safe(() => doc.documentPreferences.slugTopOffset, null), bottom: safe(() => doc.documentPreferences.slugBottomOffset, null), insideOrLeft: safe(() => doc.documentPreferences.slugInsideOrLeftOffset, null), outsideOrRight: safe(() => doc.documentPreferences.slugRightOrOutsideOffset, null) },
+                    documentUnits: { horizontalMeasurementUnits: safe(() => String(docUnits.horizontalMeasurementUnits), null), verticalMeasurementUnits: safe(() => String(docUnits.verticalMeasurementUnits), null), rulerOrigin: safe(() => String(docUnits.rulerOrigin), null) },
+                    warnings: []
+                };
+            `);
+        })(), 'inspect_page_geometry');
     }
 
     static duplicate_items_to_page(args = {}) {
@@ -515,23 +748,25 @@ export class TemplateHandlers {
 
     static export_derivative_preview(args = {}) {
         return response((async () => {
-            if (!args.derivativeId || args.pageIndex == null) throw new Error('derivativeId and pageIndex are required');
+            if (!args.derivativeId && args.pageIndex == null) throw new Error('derivativeId or pageIndex is required');
+            const resolved = args.derivativeId ? unwrapToolResult(await this.resolve_derivative_page({ derivativeId: args.derivativeId })) : { pageIndex: args.pageIndex, pageId: null };
             const manifest = loadWorkspace();
             const ext = (args.format || 'png').toLowerCase() === 'jpg' ? 'jpg' : 'png';
-            const existing = (manifest.previews || []).filter((preview) => preview.derivativeId === args.derivativeId && preview.pageIndex === args.pageIndex);
-            const outputName = `${args.derivativeId}__${args.pageIndex}__preview_${String(existing.length + 1).padStart(3, '0')}.${ext}`;
-            const rec = await this.exportPreview('page', { ...args, pageIndex: args.pageIndex, format: ext, outputName, overwrite: args.overwrite });
-            const previewId = `preview_${args.derivativeId}_${String(existing.length + 1).padStart(3, '0')}`;
-            const preview = { ...rec, previewId, derivativeId: args.derivativeId, mimeType: ext === 'jpg' ? 'image/jpeg' : 'image/png', createdAt: nowIso() };
+            const derivativeId = args.derivativeId || this.resolveDerivativeRecord(manifest, { pageIndex: resolved.pageIndex }).derivativeId;
+            const existing = (manifest.previews || []).filter((preview) => preview.derivativeId === derivativeId && preview.pageIndex === resolved.pageIndex);
+            const outputName = `${derivativeId}__${resolved.pageIndex}__preview_${String(existing.length + 1).padStart(3, '0')}.${ext}`;
+            const rec = await this.exportPreview('page', { ...args, derivativeId, pageIndex: resolved.pageIndex, format: ext, outputName, overwrite: args.overwrite });
+            const previewId = `preview_${derivativeId}_${String(existing.length + 1).padStart(3, '0')}`;
+            const preview = { ...rec, previewId, derivativeId, pageId: resolved.pageId || null, mimeType: ext === 'jpg' ? 'image/jpeg' : 'image/png', createdAt: nowIso() };
             const fresh = loadWorkspace();
             fresh.previews = (fresh.previews || []).filter((item) => item.previewId !== rec.previewId).concat(preview);
             saveWorkspace(fresh);
-            const derivative = this.resolveDerivativeRecord(fresh, { derivativeId: args.derivativeId });
-            upsertDerivativePage(fresh, args.derivativeId, {
+            const derivative = this.resolveDerivativeRecord(fresh, { derivativeId });
+            upsertDerivativePage(fresh, derivativeId, {
                 latestPreviewId: previewId,
                 previewIds: [...new Set([...(derivative.previewIds || []), previewId])]
             });
-            return { success:true, previewId, derivativeId: args.derivativeId, pageIndex: args.pageIndex, path: preview.path, mimeType: preview.mimeType, widthPx: preview.width, heightPx: preview.height, createdAt: preview.createdAt };
+            return { success:true, previewId, derivativeId, pageIndex: resolved.pageIndex, pageId: resolved.pageId || null, path: preview.path, mimeType: preview.mimeType, widthPx: preview.widthPx, heightPx: preview.heightPx, sizeBytes: preview.sizeBytes, createdAt: preview.createdAt };
         })(), 'export_derivative_preview');
     }
 
@@ -539,19 +774,22 @@ export class TemplateHandlers {
         return response((async () => {
             const manifest = loadWorkspace();
             const derivative = this.resolveDerivativeRecord(manifest, args);
-            const itemsResult = await this.uxpTool('inspect_page_items_v2', { pageIndex: derivative.pageIndex, includeHidden: true, includeTextExcerpt: true });
-            const checksResult = args.includeChecks ? await this.run_derivative_checks({ derivativeId: derivative.derivativeId, pageIndex: derivative.pageIndex }) : null;
+            const resolved = unwrapToolResult(await this.resolve_derivative_page({ derivativeId: derivative.derivativeId }));
+            const itemsResult = await this.inspectPageItemsRaw({ pageIndex: resolved.pageIndex, includeHidden: true, includeTextExcerpt: true });
+            const checksResult = args.includeChecks ? unwrapToolResult(await this.run_derivative_checks({ derivativeId: derivative.derivativeId })) : null;
             const objects = itemsResult.items || [];
-            const textSlots = objects.filter((item) => item.type && /TextFrame/i.test(item.type));
-            const imageSlots = objects.filter((item) => item.image?.hasPlacedGraphic || /Rectangle|Oval|Polygon/i.test(item.type || '')).filter((item) => item.label?.slot || item.image?.hasPlacedGraphic);
-            const vectorObjects = objects.filter((item) => !item.text && !item.image?.hasPlacedGraphic);
+            const metadataObjects = objects.filter((item) => item.label?.role === 'page_marker' || item.label?.metadata === true);
+            const visibleObjects = objects.filter((item) => !metadataObjects.includes(item));
+            const textSlots = visibleObjects.filter((item) => item.type && /TextFrame/i.test(item.type));
+            const imageSlots = visibleObjects.filter((item) => item.image?.hasPlacedGraphic || /Rectangle|Oval|Polygon/i.test(item.type || '')).filter((item) => item.label?.slot || item.image?.hasPlacedGraphic);
+            const vectorObjects = visibleObjects.filter((item) => !item.text && !item.image?.hasPlacedGraphic);
             const unlabeledObjects = objects.filter((item) => !item.label || !Object.keys(item.label).length);
-            const previews = (manifest.previews || []).filter((preview) => preview.derivativeId === derivative.derivativeId && preview.pageIndex === derivative.pageIndex);
+            const previews = (manifest.previews || []).filter((preview) => preview.derivativeId === derivative.derivativeId && preview.pageIndex === resolved.pageIndex);
             const versions = (manifest.versions || []).filter((version) => version.derivativeId === derivative.derivativeId);
-            const snapshot = { inspectionId: `inspection_${derivative.derivativeId}_${String((derivative.inspectionIds || []).length + 1).padStart(3, '0')}`, derivativeId: derivative.derivativeId, pageIndex: derivative.pageIndex, createdAt: nowIso(), previewId: derivative.latestPreviewId || null, objects, textSlots, imageSlots, vectorObjects, unlabeledObjects, checks: checksResult?.checks || null };
+            const snapshot = { inspectionId: `inspection_${derivative.derivativeId}_${String((derivative.inspectionIds || []).length + 1).padStart(3, '0')}`, derivativeId: derivative.derivativeId, pageIndex: resolved.pageIndex, pageId: resolved.pageId || null, createdAt: nowIso(), previewId: derivative.latestPreviewId || null, objects: visibleObjects, textSlots, imageSlots, vectorObjects, unlabeledObjects, checks: checksResult?.checks || null };
             this.appendInspectionSnapshot(manifest, snapshot);
             upsertDerivativePage(manifest, derivative.derivativeId, { inspectionIds: [...new Set([...(derivative.inspectionIds || []), snapshot.inspectionId])] });
-            return { success:true, derivativeId: derivative.derivativeId, pageIndex: derivative.pageIndex, format: derivative.format, objects: args.includeObjectDetails === false ? objects.map((item) => ({ objectId: item.objectId, name: item.name, type: item.type, bounds: item.bounds, label: item.label })) : objects, textSlots, imageSlots, vectorObjects, unlabeledObjects, previews: args.includePreviewHistory ? previews : previews.slice(-1), versions, ...(checksResult ? { checks: checksResult.checks } : {}) };
+            return { success:true, derivativeId: derivative.derivativeId, pageIndex: resolved.pageIndex, pageId: resolved.pageId || null, pageName: resolved.pageName || null, pageBounds: resolved.pageBounds || null, pageSize: resolved.pageSize || derivative.pageSize || null, spreadIndex: resolved.spreadIndex ?? null, resolvedBy: resolved.resolvedBy, objectCount: visibleObjects.length, format: derivative.format, objects: args.includeObjectDetails === false ? visibleObjects.map((item) => ({ objectId: item.objectId, name: item.name, type: item.type, bounds: item.bounds, label: item.label })) : visibleObjects, textSlots, imageSlots, vectorObjects, unlabeledObjects, metadataObjects, previews: args.includePreviewHistory ? previews : previews.slice(-1), versions, warnings: resolved.warnings || [], ...(checksResult ? { checks: checksResult.checks } : {}) };
         })(), 'inspect_derivative');
     }
 
@@ -569,7 +807,14 @@ export class TemplateHandlers {
                     const it = resolveItem(edit);
                     const before = itemSnapshot(it);
                     const actions = [];
-                    if (edit.setBounds) { setBoundsSmart(it, boundsInPt(edit.setBounds, 'pt'), {}); actions.push('setBounds'); }
+                    if (edit.setBounds) {
+                        const targetPageIndex = edit.pageIndex != null ? edit.pageIndex : pageIndexOf(it);
+                        if ((edit.coordinateSpace || 'page') === 'page' && targetPageIndex == null) throw new Error('pageIndex is required when target object has no parentPage');
+                        const resolved = resolveBoundsForPage({ ...edit, bounds: edit.setBounds }, targetPageIndex);
+                        const nextBounds = setBoundsSmart(it, resolved.documentBounds, { preserveCenter:edit.preserveCenter, preserveAspectRatio:edit.preserveAspectRatio, anchor:edit.anchor, roundTo:edit.roundTo });
+                        validateBoundsOnPage(nextBounds, resolved.pageBounds, edit);
+                        actions.push('setBounds');
+                    }
                     if (edit.setText != null) { it.contents = String(edit.setText); actions.push('setText'); }
                     if (edit.applyStyle) {
                         applyTextStyles(it, edit.applyStyle);
@@ -597,12 +842,7 @@ export class TemplateHandlers {
     }
 
     static set_bounds(args = {}) {
-        return response(runGuarded(`${jsHelpers()} const args=${q(args)};
-            const it = resolveItem(args);
-            const oldBounds = clone(safe(()=>it.geometricBounds));
-            const newBounds = setBoundsSmart(it, boundsInPt(args.bounds, args.unit || 'pt'), { preserveCenter:args.preserveCenter, preserveAspectRatio:args.preserveAspectRatio, anchor:args.anchor, roundTo:args.roundTo });
-            return { success:true, objectId:safe(()=>it.id), oldBounds, newBounds, unit:'pt', ...(args.returnBeforeAfter ? { before:oldBounds, after:newBounds } : {}) };
-        `), 'set_bounds');
+        return response(this.uxpTool('set_bounds', args), 'set_bounds');
     }
 
     static align_items(args = {}) {
@@ -713,7 +953,10 @@ export class TemplateHandlers {
             const before = items.map(itemSnapshot);
             const offset = Array.isArray(args.offset) ? [toPt(Number(args.offset[0] || 0), args.unit || 'pt'), toPt(Number(args.offset[1] || 0), args.unit || 'pt')] : [0,0];
             const scale = args.scale == null ? 1 : Number(args.scale);
-            const targetBox = args.targetBox ? boundsInPt(args.targetBox, args.unit || 'pt') : null;
+            const targetPageIndex = args.pageIndex != null ? args.pageIndex : pageIndexOf(items[0]);
+            if (args.targetBox && (args.coordinateSpace || 'page') === 'page' && targetPageIndex == null) throw new Error('pageIndex is required when target items have no parentPage');
+            const resolvedTarget = args.targetBox ? resolveBoundsForPage({ ...args, bounds: args.targetBox }, targetPageIndex) : null;
+            const targetBox = resolvedTarget ? resolvedTarget.documentBounds : null;
             const sourceBox = (()=>{ const bounds = items.map((it)=>clone(it.geometricBounds)); return [Math.min.apply(null,bounds.map((b)=>b[0])), Math.min.apply(null,bounds.map((b)=>b[1])), Math.max.apply(null,bounds.map((b)=>b[2])), Math.max.apply(null,bounds.map((b)=>b[3]))]; })();
             for (const item of items) {
                 const bounds = clone(item.geometricBounds); let next = clone(bounds);
@@ -727,9 +970,11 @@ export class TemplateHandlers {
                     const top = bounds[0] + offset[0], left = bounds[1] + offset[1], width = widthOf(bounds) * scale, height = heightOf(bounds) * scale;
                     next = [top, left, top + height, left + width];
                 }
-                setBoundsRaw(item, next);
+                const applied = setBoundsRaw(item, next);
+                const pageIdx = args.pageIndex != null ? args.pageIndex : pageIndexOf(item);
+                if (pageIdx != null) validateBoundsOnPage(applied, pageBounds(pageIdx), args);
             }
-            return { success:true, before, after:items.map(itemSnapshot) };
+            return { success:true, before, after:items.map(itemSnapshot), pageBounds:targetPageIndex != null ? pageBounds(targetPageIndex) : null, coordinateSpace:args.coordinateSpace || 'page' };
         `), 'move_resize_items');
     }
 
@@ -740,10 +985,19 @@ export class TemplateHandlers {
             const created = [];
             for (const shape of (args.shapes || [])) {
                 let item;
-                if (shape.shapeType === 'rectangle') item = page.rectangles.add({ geometricBounds: boundsInPt(shape.bounds, 'pt') });
-                else if (shape.shapeType === 'oval') item = page.ovals.add({ geometricBounds: boundsInPt(shape.bounds, 'pt') });
-                else if (shape.shapeType === 'polygon') { item = page.polygons.add(); if (shape.bounds) item.geometricBounds = boundsInPt(shape.bounds, 'pt'); }
-                else if (shape.shapeType === 'line') { item = page.graphicLines.add(); item.paths.item(0).entirePath = shape.points || [[0,0],[10,10]]; }
+                const layer = writableLayer(shape.layerName || args.layerName || 'AGENT_WORK');
+                if (shape.shapeType === 'rectangle' || shape.shapeType === 'oval' || shape.shapeType === 'polygon') {
+                    const resolved = resolveBoundsForPage({ ...args, ...shape, pageIndex: args.pageIndex, bounds: shape.bounds, coordinateSpace: shape.coordinateSpace || args.coordinateSpace || 'page' }, args.pageIndex);
+                    const boundsValidation = validateBoundsOnPage(resolved.documentBounds, resolved.pageBounds, { ...args, ...shape });
+                    item = (shape.shapeType === 'oval' ? page.ovals : shape.shapeType === 'polygon' ? page.polygons : page.rectangles).add();
+                    item.itemLayer = layer;
+                    item.geometricBounds = resolved.documentBounds;
+                    item.__boundsValidation = boundsValidation;
+                    item.__localBounds = resolved.localBounds;
+                    item.__pageBounds = resolved.pageBounds;
+                    item.__documentBounds = resolved.documentBounds;
+                }
+                else if (shape.shapeType === 'line') { const start = resolvePointForPage({ ...args, ...shape, pageIndex: args.pageIndex, coordinateSpace: shape.coordinateSpace || args.coordinateSpace || 'page' }, shape.start || (shape.points || [])[0] || [0,0], args.pageIndex); const end = resolvePointForPage({ ...args, ...shape, pageIndex: args.pageIndex, coordinateSpace: shape.coordinateSpace || args.coordinateSpace || 'page' }, shape.end || (shape.points || [])[1] || [10,10], args.pageIndex); item = page.graphicLines.add(); item.itemLayer = layer; item.paths.item(0).entirePath = [start.documentPoint, end.documentPoint]; item.__pageBounds = start.pageBounds; }
                 else throw new Error('Unsupported shapeType');
                 applyBasics(item, shape);
                 const label = Object.assign({ derivativeId:args.derivativeId, motifId:args.motifId, source:'agent_created', editable:true }, args.label || {});
@@ -756,7 +1010,7 @@ export class TemplateHandlers {
                 writeLabel(group, Object.assign({ derivativeId:args.derivativeId, motifId:args.motifId, source:'agent_created', editable:true }, args.label || {}));
                 groupId = safe(()=>group.id);
             }
-            return { success:true, motifId:args.motifId, objectIds:created.map((item)=>safe(()=>item.id)), ...(groupId ? { groupId } : {}) };
+            return { success:true, motifId:args.motifId, objectIds:created.map((item)=>safe(()=>item.id)), objects:created.map((item)=>({ objectId:safe(()=>item.id), shapeType:safe(()=>item.constructor.name), localBounds:safe(()=>item.__localBounds, null), documentBounds:safe(()=>item.__documentBounds, safe(()=>item.geometricBounds, null)), pageBounds:safe(()=>item.__pageBounds, null), boundsValidation:safe(()=>item.__boundsValidation, null) })), ...(groupId ? { groupId } : {}) };
         `), 'create_vector_motif');
     }
 
@@ -832,11 +1086,12 @@ export class TemplateHandlers {
             if (!args.derivativeId && args.pageIndex == null) throw new Error('derivativeId or pageIndex is required');
             const manifest = loadWorkspace();
             const derivative = args.derivativeId || args.pageIndex != null ? this.resolveDerivativeRecord(manifest, args) : null;
-            const pageIndex = derivative?.pageIndex ?? args.pageIndex;
-            const itemsResult = await this.uxpTool('inspect_page_items_v2', { pageIndex, includeHidden: true, includeTextExcerpt: true });
+            const resolved = args.derivativeId ? unwrapToolResult(await this.resolve_derivative_page({ derivativeId: args.derivativeId })) : unwrapToolResult(await this.resolve_derivative_page({ pageIndex: args.pageIndex }));
+            const pageIndex = resolved.pageIndex;
+            const itemsResult = await this.inspectPageItemsRaw({ pageIndex, includeHidden: true, includeTextExcerpt: true });
             const linksResult = await this.uxpTool('check_missing_links', {});
             const fontsResult = await this.uxpTool('check_missing_fonts', {});
-            const objects = itemsResult.items || [];
+            const objects = (itemsResult.items || []).filter((item) => !(item.label?.role === 'page_marker' || item.label?.metadata === true));
             const oversetIssues = objects.filter((item) => item.text?.overset).map((item) => ({ objectId: item.objectId, name: item.name, evidence: item.text.excerpt }));
             const visibleReference = objects.filter((item) => item.label?.referenceOnly && item.visible !== false).map((item) => ({ objectId: item.objectId, name: item.name }));
             const unlabeled = objects.filter((item) => !item.label || !Object.keys(item.label).length).map((item) => ({ objectId: item.objectId, name: item.name }));
@@ -856,7 +1111,7 @@ export class TemplateHandlers {
             if (derivative) {
                 upsertDerivativePage(manifest, derivative.derivativeId, { checkHistory: [...(derivative.checkHistory || []), { createdAt: nowIso(), checks, ok: issues.length === 0 }] });
             }
-            return { success:true, ok: issues.length === 0, derivativeId: derivative?.derivativeId, pageIndex, checks, issues };
+            return { success:true, ok: issues.length === 0, derivativeId: derivative?.derivativeId, pageIndex, pageId: resolved.pageId || null, checks, issues, warnings: resolved.warnings || [] };
         })(), 'run_derivative_checks');
     }
 
@@ -898,15 +1153,16 @@ export class TemplateHandlers {
                 layer.visible = true; layer.locked = false; layer.printable = false;
                 if (args.pageIndex == null) throw new Error('pageIndex is required');
                 const p = pageByIndex(args.pageIndex);
-                const b = boundsInPt(args.bounds, args.unit || 'pt');
-                const rect = p.rectangles.add({ geometricBounds: b, itemLayer: layer });
+                const resolved = resolveBoundsForPage(args);
+                const boundsValidation = validateBoundsOnPage(resolved.documentBounds, resolved.pageBounds, args);
+                const rect = p.rectangles.add({ geometricBounds: resolved.documentBounds, itemLayer: layer });
                 rect.name = args.name || 'reference_underlay';
                 writeLabel(rect, { referenceOnly:true, source:'reference_underlay', ...(args.label||{}) });
                 rect.nonprinting = true;
                 rect.place(args.imagePath, false);
                 rect.fit(FitOptions.FILL_PROPORTIONALLY);
                 rect.sendToBack(); layer.locked = args.lockLayer !== false;
-                return { success:true, action:'create_reference_underlay', layerName, imagePath:args.imagePath, ...meta(rect), warnings:['Path-string placement/layer properties pending live UXP validation'] };
+                return { success:true, action:'create_reference_underlay', layerName, imagePath:args.imagePath, coordinateSpace:resolved.coordinateSpace, localBounds:resolved.localBounds, documentBounds:resolved.documentBounds, pageBounds:resolved.pageBounds, boundsValidation, ...meta(rect), warnings:['Path-string placement/layer properties pending live UXP validation'] };
             `);
         })(), 'create_reference_underlay');
     }
@@ -935,19 +1191,23 @@ export class TemplateHandlers {
     static exportPreview(kind, args) {
         return response((async () => {
             const m = loadWorkspace();
+            await this.ensureTemplateReady({ allowSwitchDocument: true, openIfMissing: true });
             const ext = (args.format || 'png').toLowerCase() === 'jpg' ? 'jpg' : 'png';
             const outputName = safeBasename(args.outputName || `${kind}_${args.pageIndex ?? args.spreadIndex}.${ext}`);
             const out = assertWorkspacePath(path.join(m.workspaceRoot, 'previews', outputName), { kind: 'previews', manifest: m }).path;
             if (fs.existsSync(out) && !args.overwrite) throw new Error('Preview exists; set overwrite=true');
+            const resolved = args.derivativeId ? unwrapToolResult(await this.resolve_derivative_page({ derivativeId: args.derivativeId })) : null;
+            const pageIndex = resolved?.pageIndex ?? args.pageIndex ?? null;
             await runGuarded(`
                 const out = ${q(out)};
                 const isJpg = ${q(ext === 'jpg')};
-                const pageIndex = ${q(args.pageIndex ?? null)};
+                const pageIndex = ${q(pageIndex)};
                 const spreadIndex = ${q(args.spreadIndex ?? null)};
                 let pageString = null;
                 if (${q(kind)} === 'page') {
                     if (pageIndex === null || pageIndex < 0 || pageIndex >= doc.pages.length) throw new Error('pageIndex out of range');
-                    pageString = String(pageIndex + 1);
+                    const page = doc.pages.item ? doc.pages.item(pageIndex) : doc.pages[pageIndex];
+                    pageString = String(page.name || (pageIndex + 1));
                 } else {
                     if (spreadIndex === null || spreadIndex < 0 || spreadIndex >= doc.spreads.length) throw new Error('spreadIndex out of range');
                     const spread = doc.spreads.item(spreadIndex);
@@ -974,10 +1234,106 @@ export class TemplateHandlers {
                 }
                 return { success:true, path: out };
             `);
-            const rec = { previewId: `preview_${Date.now()}_${kind}_${args.pageIndex ?? args.spreadIndex ?? 0}`, path: out, ...imageInfo(out), pageIndex: args.pageIndex ?? null, spreadIndex: args.spreadIndex ?? null, createdAt: new Date().toISOString() };
+            const stat = fileStatEvidence(out);
+            const info = imageInfo(out);
+            if (!info.widthPx || !info.heightPx) throw new Error('Preview exported but dimensions are invalid');
+            const rec = { previewId: `preview_${Date.now()}_${kind}_${pageIndex ?? args.spreadIndex ?? 0}`, path: out, ...info, sizeBytes: stat.sizeBytes, pageIndex, pageId: resolved?.pageId || null, spreadIndex: args.spreadIndex ?? null, createdAt: new Date().toISOString() };
             m.previews.push(rec); saveWorkspace(m);
             return rec;
         })(), `export_${kind}_preview`);
+    }
+
+    static verify_template_roundtrip(args = {}) {
+        return response((async () => {
+            await this.ensureTemplateReady({ allowSwitchDocument: true, openIfMissing: true });
+            const resolved = args.derivativeId ? unwrapToolResult(await this.resolve_derivative_page({ derivativeId: args.derivativeId })) : unwrapToolResult(await this.resolve_derivative_page({ pageIndex: args.pageIndex }));
+            const save = unwrapToolResult(await this.save_working_copy({}));
+            const itemsResult = await this.inspectPageItemsRaw({ pageIndex: resolved.pageIndex, includeHidden: true, includeTextExcerpt: true });
+            const visibleItems = (itemsResult.items || []).filter((item) => !(item.label?.role === 'page_marker' || item.label?.metadata === true));
+            const checks = unwrapToolResult(await this.run_derivative_checks({ derivativeId: args.derivativeId || undefined, pageIndex: resolved.pageIndex, requireNoOverset: args.requireNoOverset !== false, requireNoMissingLinks: args.requireNoMissingLinks === true }));
+            const issues = [];
+            if (visibleItems.length < (args.expectedMinItems ?? 1)) issues.push({ check: 'expectedMinItems', expectedMinItems: args.expectedMinItems ?? 1, actual: visibleItems.length });
+            if (checks.ok === false) issues.push(...(checks.issues || []));
+            let preview = null;
+            if (args.requirePreview !== false) {
+                preview = unwrapToolResult(await this.export_derivative_preview({ derivativeId: args.derivativeId, pageIndex: resolved.pageIndex, overwrite: args.overwritePreview !== false }));
+                if (!preview?.sizeBytes || !preview?.widthPx || !preview?.heightPx) issues.push({ check: 'preview', issue: 'Preview evidence missing or zero-sized' });
+            }
+            return {
+                success: true,
+                ok: issues.length === 0,
+                derivativeId: args.derivativeId || null,
+                pageIndex: resolved.pageIndex,
+                pageId: resolved.pageId || null,
+                itemCount: visibleItems.length,
+                save,
+                checks: checks.checks || null,
+                preview,
+                issues,
+                warnings: resolved.warnings || []
+            };
+        })(), 'verify_template_roundtrip');
+    }
+
+    static finalize_derivative(args = {}) {
+        return response((async () => {
+            if (!args.derivativeId) throw new Error('derivativeId is required');
+            await this.ensureTemplateReady({ allowSwitchDocument: true, openIfMissing: true });
+            const inspection = unwrapToolResult(await this.inspect_derivative({ derivativeId: args.derivativeId, includeChecks: true, includePreviewHistory: true }));
+            const save = unwrapToolResult(await this.save_working_copy({}));
+            const version = args.saveVersion === false ? null : unwrapToolResult(await this.save_version({ derivativeId: args.derivativeId, label: args.versionLabel || null }));
+            const preview = args.requirePreview === false ? null : unwrapToolResult(await this.export_derivative_preview({ derivativeId: args.derivativeId, overwrite: true }));
+            const roundtrip = unwrapToolResult(await this.verify_template_roundtrip({ derivativeId: args.derivativeId, expectedMinItems: args.expectedMinItems ?? 1, requirePreview: args.requirePreview !== false, requireNoOverset: args.requireNoOverset !== false, requireNoMissingLinks: args.requireNoMissingLinks === true, overwritePreview: true }));
+            return {
+                success: true,
+                ok: !!roundtrip?.ok,
+                derivativeId: args.derivativeId,
+                inspection,
+                save,
+                version,
+                preview,
+                roundtrip,
+                issues: roundtrip.issues || []
+            };
+        })(), 'finalize_derivative');
+    }
+
+    static build_derivative_from_recipe(args = {}) {
+        return response((async () => {
+            if (!args.derivativeId) throw new Error('derivativeId is required');
+            if (!Array.isArray(args.items)) throw new Error('items are required');
+            await this.ensureTemplateReady({ allowSwitchDocument: true, openIfMissing: true });
+            const mode = args.mode || 'fail_fast';
+            const createdObjectIds = [];
+            let page = unwrapToolResult(await this.create_derivative_page(args));
+            let failedStep = null;
+            try {
+                for (const item of args.items) {
+                    const common = { ...args, ...item, derivativeId: args.derivativeId, pageIndex: page.pageIndex, coordinateSpace: item.coordinateSpace || args.coordinateSpace || 'page', layerName: item.layerName || args.layerName || 'AGENT_WORK', rejectOutOfPageBounds: item.rejectOutOfPageBounds ?? args.rejectOutOfPageBounds, maxOutsidePageRatio: item.maxOutsidePageRatio ?? args.maxOutsidePageRatio, label: shallowMergeLabel({ derivativeId: args.derivativeId, role: item.role, slot: item.slot, motifId: item.motifId, source: 'agent_created', editable: true }, item.label) };
+                    let result;
+                    if (item.type === 'text') result = await this.createTextFrameRaw({ ...common, text: item.text || '' });
+                    else if (item.type === 'image') result = await this.createImageFrameRaw({ ...common, imagePath: item.imagePath, placeholder: item.placeholder !== false, fitMode: item.fitMode });
+                    else if (item.type === 'shape') result = await this.createShapeRaw({ ...common, shapeType: item.shapeType || 'rectangle' });
+                    else if (item.type === 'line') result = await this.createLineRaw({ ...common, start: item.start, end: item.end });
+                    else throw new Error(`Unsupported recipe item type: ${item.type}`);
+                    createdObjectIds.push(result.objectId);
+                }
+            } catch (error) {
+                failedStep = String(error.message || error);
+                if (mode === 'fail_fast') {
+                    const roundtrip = await this.verify_template_roundtrip({ derivativeId: args.derivativeId, expectedMinItems: 0, requirePreview: false, requireNoOverset: false }).then(unwrapToolResult).catch(() => null);
+                    return { success: true, ok: false, derivativeId: args.derivativeId, pageIndex: page.pageIndex, createdObjectIds, failedStep, roundtrip };
+                }
+            }
+            if (Array.isArray(args.edits) && args.edits.length) await this.apply_layout_recipe({ derivativeId: args.derivativeId, edits: args.edits, mode });
+            const inspectionSummary = unwrapToolResult(await this.inspect_derivative({ derivativeId: args.derivativeId, includeChecks: true, includeObjectDetails: false }));
+            const checks = unwrapToolResult(await this.run_derivative_checks({ derivativeId: args.derivativeId, ...(args.checks || {}) }));
+            const save = unwrapToolResult(await this.save_working_copy({}));
+            const version = args.saveVersion === false ? null : unwrapToolResult(await this.save_version({ derivativeId: args.derivativeId, label: args.versionLabel || null }));
+            const preview = args.exportPreview === false ? null : unwrapToolResult(await this.export_derivative_preview({ derivativeId: args.derivativeId, overwrite: true }));
+            const roundtrip = unwrapToolResult(await this.verify_template_roundtrip({ derivativeId: args.derivativeId, expectedMinItems: Math.max(1, createdObjectIds.length), requirePreview: args.exportPreview !== false, requireNoOverset: args.checks?.requireNoOverset !== false, requireNoMissingLinks: args.checks?.requireNoMissingLinks === true, overwritePreview: true }));
+            return { success: true, ok: !!roundtrip?.ok, derivativeId: args.derivativeId, pageIndex: page.pageIndex, pageId: page.pageId || null, createdObjectIds, inspectionSummary, checks: checks.checks || null, save, version, preview, roundtrip, ...(failedStep ? { failedStep } : {}) };
+        })(), 'build_derivative_from_recipe');
     }
 
     static uxpTool(name, args) {
@@ -1121,24 +1477,25 @@ function buildCreateObjectScript() {
             const p = doc.pages.add();
             try {
                 if (args.name) p.name=args.name;
+                if (args.derivativeId) { try { p.insertLabel(${q(LABEL_KEY)}, JSON.stringify({ derivativeId: args.derivativeId, role: 'derivative_page', source: 'mcp' })); } catch(e) { p.label = JSON.stringify({ derivativeId: args.derivativeId, role: 'derivative_page', source: 'mcp' }); } }
                 if (dims) p.adjustLayout({ width:dims.width, height:dims.height });
                 const margins = applyPageMargins(p,args);
-                return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null, pageSize:safe(()=>({ width:p.bounds[3]-p.bounds[1], height:p.bounds[2]-p.bounds[0] }), dims), margins };
+                const bounds = clone(safe(()=>p.bounds));
+                return { success:true, pageIndex:collectionIndexById(doc.pages, p), pageId:safe(()=>p.id), name:safe(()=>p.name), pageBounds:bounds, spreadIndex:collectionIndexById(doc.spreads, safe(()=>p.parent, null)), derivativeId:args.derivativeId||null, pageSize:safe(()=>({ width:p.bounds[3]-p.bounds[1], height:p.bounds[2]-p.bounds[0], unit:'pt' }), dims), margins };
             } catch (e) { try { p.remove(); } catch(_) {} throw e; }
         }
-        if (n === 'duplicate_page') { const src=at(doc.pages,args.pageIndex||0); const p=src.duplicate(); return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null }; }
-        if (n === 'create_text_frame') { if (args.pageIndex == null) throw new Error('pageIndex is required'); const p=pageByIndex(args.pageIndex); it=p.textFrames.add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); it.contents=args.text||args.content||''; applyBasics(it,args); applyTextStyles(it,args); return { success:true, ...meta(it), unit:'pt', text:textExcerpt(it) }; }
-        if (n === 'create_image_frame' || n === 'create_shape') { if (args.pageIndex == null) throw new Error('pageIndex is required'); const p=pageByIndex(args.pageIndex); const type=args.shapeType||'rectangle'; it=(type==='oval'?p.ovals:type==='polygon'?p.polygons:p.rectangles).add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); applyBasics(it,args); if(n==='create_image_frame' && args.imagePath){ it.place(args.imagePath, false); if (args.fitMode) applyFitMode(it, args.fitMode); } return { success:true, ...meta(it), unit:'pt', hasPlacedGraphic:!!linkInfo(it), link:linkInfo(it) }; }
-        if (n === 'create_line') { if (args.pageIndex == null) throw new Error('pageIndex is required'); const p=pageByIndex(args.pageIndex); it=p.graphicLines.add(); it.paths.item(0).entirePath=[[toPt(args.start[0],args.unit),toPt(args.start[1],args.unit)],[toPt(args.end[0],args.unit),toPt(args.end[1],args.unit)]]; applyBasics(it,args); return { success:true, ...meta(it), unit:'pt' }; }
+        if (n === 'duplicate_page') { const src=at(doc.pages,args.pageIndex||0); const p=src.duplicate(); return { success:true, pageIndex:collectionIndexById(doc.pages, p), pageId:safe(()=>p.id), name:safe(()=>p.name), pageBounds:clone(safe(()=>p.bounds)), spreadIndex:collectionIndexById(doc.spreads, safe(()=>p.parent, null)), derivativeId:args.derivativeId||null, pageSize:safe(()=>({ width:p.bounds[3]-p.bounds[1], height:p.bounds[2]-p.bounds[0], unit:'pt' }), null) }; }
+        if (n === 'create_text_frame') { if (args.pageIndex == null) throw new Error('pageIndex is required'); const p=pageByIndex(args.pageIndex); const resolved = resolveBoundsForPage(args); const boundsValidation = validateBoundsOnPage(resolved.documentBounds, resolved.pageBounds, args); const layer = writableLayer(args.layerName || 'AGENT_WORK'); it=p.textFrames.add(); it.itemLayer = layer; it.geometricBounds=resolved.documentBounds; it.contents=args.text||args.content||''; applyBasics(it,args); applyTextStyles(it,args); return { success:true, ...meta(it), unit:'pt', coordinateSpace:resolved.coordinateSpace, localBounds:resolved.localBounds, documentBounds:resolved.documentBounds, pageBounds:resolved.pageBounds, boundsValidation, text:textExcerpt(it) }; }
+        if (n === 'create_image_frame' || n === 'create_shape') { if (args.pageIndex == null) throw new Error('pageIndex is required'); const p=pageByIndex(args.pageIndex); const resolved = resolveBoundsForPage(args); const boundsValidation = validateBoundsOnPage(resolved.documentBounds, resolved.pageBounds, args); const layer = writableLayer(args.layerName || 'AGENT_WORK'); const type=args.shapeType||'rectangle'; it=(type==='oval'?p.ovals:type==='polygon'?p.polygons:p.rectangles).add(); it.itemLayer = layer; it.geometricBounds=resolved.documentBounds; applyBasics(it,args); if(n==='create_image_frame' && args.imagePath){ it.place(args.imagePath, false); if (args.fitMode) applyFitMode(it, args.fitMode); } return { success:true, ...meta(it), unit:'pt', coordinateSpace:resolved.coordinateSpace, localBounds:resolved.localBounds, documentBounds:resolved.documentBounds, pageBounds:resolved.pageBounds, boundsValidation, hasPlacedGraphic:!!linkInfo(it), link:linkInfo(it) }; }
+        if (n === 'create_line') { if (args.pageIndex == null) throw new Error('pageIndex is required'); const p=pageByIndex(args.pageIndex); const layer = writableLayer(args.layerName || 'AGENT_WORK'); const start = resolvePointForPage(args, args.start); const end = resolvePointForPage(args, args.end); it=p.graphicLines.add(); it.itemLayer = layer; it.paths.item(0).entirePath=[start.documentPoint,end.documentPoint]; applyBasics(it,args); const lineBounds = clone(safe(()=>it.geometricBounds, null)); const boundsValidation = lineBounds ? validateBoundsOnPage(lineBounds, start.pageBounds, { ...args, rejectOutOfPageBounds: args.rejectOutOfPageBounds !== false }) : { ok:true, outsideRatio:0, intersectsPage:true, warnings:[] }; return { success:true, ...meta(it), unit:'pt', coordinateSpace:start.coordinateSpace, localStart:start.localPoint, localEnd:end.localPoint, documentStart:start.documentPoint, documentEnd:end.documentPoint, pageBounds:start.pageBounds, boundsValidation }; }
     `;
 }
 
 function buildGeometryScript() {
     return `
         if (n === 'set_text_content') { it=resolveItem(args); it.contents=args.text||''; return { success:true, ...meta(it), text:textExcerpt(it) }; }
-        if (n === 'set_bounds') { it=resolveItem(args); old=clone(safe(()=>it.geometricBounds)); return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:setBoundsSmart(it, boundsInPt(args.bounds,args.unit), { preserveCenter:args.preserveCenter, preserveAspectRatio:args.preserveAspectRatio, anchor:args.anchor, roundTo:args.roundTo }), unit:'pt' }; }
-        if (n === 'move_item') { if(!args.delta) throw new Error('delta is required'); it=resolveItem(args); old=clone(safe(()=>it.geometricBounds)); const dy=toPt(args.delta[0]||0,args.unit), dx=toPt(args.delta[1]||0,args.unit); const b=[old[0]+dy, old[1]+dx, old[2]+dy, old[3]+dx]; return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:setBoundsRaw(it, b), unit:'pt' }; }
-        if (n === 'resize_item') { if(args.delta) throw new Error('resize_item does not accept delta; use move_item for delta moves'); if(!args.bounds) throw new Error('bounds are required'); it=resolveItem(args); old=clone(safe(()=>it.geometricBounds)); return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:setBoundsSmart(it, boundsInPt(args.bounds,args.unit||'pt'), { preserveCenter:args.preserveCenter, preserveAspectRatio:args.preserveAspectRatio, anchor:args.anchor, roundTo:args.roundTo }), unit:'pt', ...(args.returnBeforeAfter ? { before:old, after:clone(safe(()=>it.geometricBounds)) } : {}) }; }
+        if (n === 'set_bounds' || n === 'resize_item') { if(n==='resize_item' && args.delta) throw new Error('resize_item does not accept delta; use move_item for delta moves'); if(!args.bounds) throw new Error('bounds are required'); it=resolveItem(args); old=clone(safe(()=>it.geometricBounds)); const targetPageIndex = args.pageIndex != null ? args.pageIndex : pageIndexOf(it); if ((args.coordinateSpace || 'page') === 'page' && targetPageIndex == null) throw new Error('pageIndex is required when target object has no parentPage'); const resolved = resolveBoundsForPage(args, targetPageIndex); const validatedTarget = setBoundsSmart(it, resolved.documentBounds, { preserveCenter:args.preserveCenter, preserveAspectRatio:args.preserveAspectRatio, anchor:args.anchor, roundTo:args.roundTo }); const boundsValidation = validateBoundsOnPage(validatedTarget, resolved.pageBounds, args); return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:validatedTarget, localBounds:resolved.localBounds, documentBounds:validatedTarget, pageBounds:resolved.pageBounds, coordinateSpace:resolved.coordinateSpace, boundsValidation, unit:'pt', ...(args.returnBeforeAfter ? { before:old, after:clone(safe(()=>it.geometricBounds)) } : {}) }; }
+        if (n === 'move_item') { if(!args.delta) throw new Error('delta is required'); it=resolveItem(args); old=clone(safe(()=>it.geometricBounds)); const dy=toPt(args.delta[0]||0,args.unit), dx=toPt(args.delta[1]||0,args.unit); const b=[old[0]+dy, old[1]+dx, old[2]+dy, old[3]+dx]; const next = setBoundsRaw(it, b); const targetPageIndex = args.pageIndex != null ? args.pageIndex : pageIndexOf(it); const pb = targetPageIndex == null ? null : pageBounds(targetPageIndex); const boundsValidation = pb ? validateBoundsOnPage(next, pb, args) : null; return { success:true, objectId:safe(()=>it.id), oldBounds:old, newBounds:next, pageBounds:pb, boundsValidation, unit:'pt' }; }
         if (n === 'rotate_item') { it=resolveItem(args); old=safe(()=>it.rotationAngle,0); it.rotationAngle=args.degrees||0; return { success:true, objectId:safe(()=>it.id), oldRotation:old, newRotation:safe(()=>it.rotationAngle) }; }
         if (n === 'lock_item' || n === 'unlock_item') { it=resolveItem(args); it.locked=n==='lock_item'; return { success:true, ...meta(it) }; }
         if (n === 'rename_page_item') { if (!args.newName) throw new Error('newName is required'); it=resolveItem(args); old=safe(()=>it.name); it.name=cleanName(args.newName); return { success:true, objectId:safe(()=>it.id), oldName:old, newName:safe(()=>it.name), name:safe(()=>it.name) }; }

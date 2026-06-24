@@ -27,6 +27,32 @@ const fitModeSchema = {
     default: 'proportionally'
 };
 
+const coordinateSpaceSchema = {
+    type: 'string',
+    enum: ['page', 'document'],
+    default: 'page',
+    description: "Coordinate interpretation. 'page' means bounds are local to the target page top-left and will be converted using page.bounds. 'document' means raw InDesign document/spread coordinates."
+};
+
+const layerNameSchema = {
+    type: 'string',
+    default: 'AGENT_WORK',
+    description: 'Writable layer for generated editable objects.'
+};
+
+const boundsValidationSchemaProps = {
+    rejectOutOfPageBounds: {
+        type: 'boolean',
+        default: true
+    },
+    maxOutsidePageRatio: {
+        type: 'number',
+        minimum: 0,
+        maximum: 1,
+        default: 0.25
+    }
+};
+
 const labelObjectSchema = { type: 'object', additionalProperties: true };
 const labelQuerySchema = { type: 'object', additionalProperties: true, description: 'Label match query against stored MCP label JSON.' };
 
@@ -58,6 +84,28 @@ function targetedSchema(properties = {}, required = [], extra = {}) {
 }
 
 const derivativeToolDefinitions = [
+    {
+        name: 'resolve_derivative_page',
+        description: 'Resolve a derivative page by durable identity evidence, not just manifest pageIndex.',
+        inputSchema: {
+            ...schema({
+                derivativeId: { type: 'string' },
+                pageIndex: { type: 'integer', minimum: 0 }
+            }),
+            anyOf: [{ required: ['derivativeId'] }, { required: ['pageIndex'] }]
+        }
+    },
+    {
+        name: 'inspect_page_geometry',
+        description: 'Inspect page/spread geometry before placing objects. Required when using page-local coordinates.',
+        inputSchema: {
+            ...schema({
+                pageIndex: { type: 'integer', minimum: 0 },
+                derivativeId: { type: 'string' }
+            }),
+            anyOf: [{ required: ['pageIndex'] }, { required: ['derivativeId'] }]
+        }
+    },
     {
         name: 'create_derivative_page',
         description: 'Create a derivative page, sized in points or mm, and record derivative page metadata in the workspace manifest.',
@@ -93,7 +141,7 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'create_text_slot',
-        description: 'Preferred template text tool. Create a semantic editable text frame with label metadata; for template generation, prefer this over create_text_frame.',
+        description: 'Preferred template text tool. Creates semantic editable text frame with label metadata. Use this instead of generic create_text_frame for derivative templates.',
         inputSchema: schema({
             derivativeId: { type: 'string' },
             role: { type: 'string' },
@@ -101,6 +149,8 @@ const derivativeToolDefinitions = [
             pageIndex: { type: 'integer', minimum: 0 },
             bounds: boundsSchema,
             unit: unitSchema,
+            coordinateSpace: coordinateSpaceSchema,
+            layerName: layerNameSchema,
             text: { type: 'string' },
             paragraphStyle: { type: 'string' },
             characterStyle: { type: 'string' },
@@ -109,12 +159,13 @@ const derivativeToolDefinitions = [
             strokeSwatch: { type: 'string' },
             name: { type: 'string' },
             label: labelObjectSchema,
-            autoFit: { type: 'boolean' }
+            autoFit: { type: 'boolean' },
+            ...boundsValidationSchemaProps
         }, ['derivativeId', 'role', 'slot', 'pageIndex', 'bounds', 'text'])
     },
     {
         name: 'create_image_slot',
-        description: 'Create an editable image frame or placeholder. imagePath must stay under workspace assets/ or input/.',
+        description: 'Preferred template image tool. Creates semantic editable image frame or placeholder with label metadata.',
         inputSchema: schema({
             derivativeId: { type: 'string' },
             role: { type: 'string' },
@@ -122,6 +173,8 @@ const derivativeToolDefinitions = [
             pageIndex: { type: 'integer', minimum: 0 },
             bounds: boundsSchema,
             unit: unitSchema,
+            coordinateSpace: coordinateSpaceSchema,
+            layerName: layerNameSchema,
             imagePath: { type: 'string' },
             placeholder: { type: 'boolean' },
             fitMode: fitModeSchema,
@@ -130,7 +183,8 @@ const derivativeToolDefinitions = [
             strokeSwatch: { type: 'string' },
             strokeWeight: { type: 'number', minimum: 0 },
             name: { type: 'string' },
-            label: labelObjectSchema
+            label: labelObjectSchema,
+            ...boundsValidationSchemaProps
         }, ['derivativeId', 'role', 'slot', 'pageIndex', 'bounds'])
     },
     {
@@ -181,6 +235,8 @@ const derivativeToolDefinitions = [
                 type: 'array',
                 items: targetedSchema({
                     setBounds: boundsSchema,
+                    pageIndex: { type: 'integer', minimum: 0 },
+                    coordinateSpace: coordinateSpaceSchema,
                     setText: { type: 'string' },
                     applyStyle: schema({
                         paragraphStyle: { type: 'string' },
@@ -196,7 +252,8 @@ const derivativeToolDefinitions = [
                     }),
                     zOrder: { type: 'string', enum: ['front', 'back'] },
                     fitMode: fitModeSchema,
-                    labelPatch: labelObjectSchema
+                    labelPatch: labelObjectSchema,
+                    ...boundsValidationSchemaProps
                 })
             }
         }, ['derivativeId', 'edits'])
@@ -260,6 +317,95 @@ const derivativeToolDefinitions = [
         }
     },
     {
+        name: 'verify_template_roundtrip',
+        description: 'Required persistence verification. Proves the derivative page exists after save/reopen/inspect/export.',
+        inputSchema: {
+            ...schema({
+                derivativeId: { type: 'string' },
+                pageIndex: { type: 'integer', minimum: 0 },
+                expectedMinItems: { type: 'integer', minimum: 0, default: 1 },
+                requirePreview: { type: 'boolean', default: true },
+                requireNoOverset: { type: 'boolean', default: true },
+                requireNoMissingLinks: { type: 'boolean', default: false },
+                overwritePreview: { type: 'boolean', default: true }
+            }),
+            anyOf: [{ required: ['derivativeId'] }, { required: ['pageIndex'] }]
+        }
+    },
+    {
+        name: 'finalize_derivative',
+        description: 'Required final checkpoint before claiming a derivative is complete.',
+        inputSchema: schema({
+            derivativeId: { type: 'string' },
+            expectedMinItems: { type: 'integer', minimum: 0, default: 1 },
+            requirePreview: { type: 'boolean', default: true },
+            requireNoOverset: { type: 'boolean', default: true },
+            requireNoMissingLinks: { type: 'boolean', default: false },
+            saveVersion: { type: 'boolean', default: true },
+            versionLabel: { type: 'string' }
+        }, ['derivativeId'])
+    },
+    {
+        name: 'build_derivative_from_recipe',
+        description: 'Preferred high-level tool for creating one derivative page transactionally. Use this instead of many separate primitive calls when possible.',
+        inputSchema: {
+            ...schema({
+                derivativeId: { type: 'string' },
+                name: { type: 'string' },
+                pageSize: { type: 'string', enum: ['social_square', 'A5', 'A3', 'poster', 'banner'] },
+                width: { type: 'number', exclusiveMinimum: 0 },
+                height: { type: 'number', exclusiveMinimum: 0 },
+                unit: unitSchema,
+                orientation: { type: 'string', enum: ['portrait', 'landscape'] },
+                basePageIndex: { type: 'integer', minimum: 0 },
+                duplicateBaseMotifs: { type: 'boolean', default: false },
+                coordinateSpace: coordinateSpaceSchema,
+                layerName: layerNameSchema,
+                ...boundsValidationSchemaProps,
+                items: {
+                    type: 'array',
+                    items: schema({
+                        type: { type: 'string', enum: ['shape', 'text', 'image', 'line'] },
+                        role: { type: 'string' },
+                        slot: { type: 'string' },
+                        motifId: { type: 'string' },
+                        shapeType: { type: 'string', enum: ['rectangle', 'oval', 'polygon'] },
+                        bounds: boundsSchema,
+                        start: pointSchema,
+                        end: pointSchema,
+                        text: { type: 'string' },
+                        imagePath: { type: 'string' },
+                        placeholder: { type: 'boolean' },
+                        paragraphStyle: { type: 'string' },
+                        characterStyle: { type: 'string' },
+                        objectStyle: { type: 'string' },
+                        fillSwatch: { type: 'string' },
+                        strokeSwatch: { type: 'string' },
+                        strokeWeight: { type: 'number', minimum: 0 },
+                        fitMode: fitModeSchema,
+                        name: { type: 'string' },
+                        label: { type: 'object', additionalProperties: true },
+                        coordinateSpace: { type: 'string', enum: ['page', 'document'] },
+                        layerName: { type: 'string' },
+                        rejectOutOfPageBounds: { type: 'boolean' },
+                        maxOutsidePageRatio: { type: 'number', minimum: 0, maximum: 1 }
+                    }, ['type'])
+                },
+                edits: { type: 'array', items: { type: 'object', additionalProperties: true } },
+                checks: schema({
+                    requireNoOverset: { type: 'boolean', default: true },
+                    requireNoMissingLinks: { type: 'boolean', default: false },
+                    requireLabels: { type: 'boolean', default: true }
+                }),
+                exportPreview: { type: 'boolean', default: true },
+                saveVersion: { type: 'boolean', default: true },
+                versionLabel: { type: 'string' },
+                mode: { type: 'string', enum: ['fail_fast', 'best_effort'], default: 'fail_fast' }
+            }, ['derivativeId', 'items']),
+            anyOf: [{ required: ['pageSize'] }, { required: ['width', 'height'] }]
+        }
+    },
+    {
         name: 'move_resize_items',
         description: 'Batch move/resize objects by targetBox or offset/scale while preserving relative layout when requested.',
         inputSchema: schema({
@@ -268,7 +414,10 @@ const derivativeToolDefinitions = [
             offset: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'number' }, description: '[topOffset,leftOffset]' },
             scale: { type: 'number' },
             unit: unitSchema,
-            preserveRelativePositions: { type: 'boolean' }
+            pageIndex: { type: 'integer', minimum: 0 },
+            coordinateSpace: coordinateSpaceSchema,
+            preserveRelativePositions: { type: 'boolean' },
+            ...boundsValidationSchemaProps
         }, ['objectIds'])
     },
     {
@@ -278,6 +427,8 @@ const derivativeToolDefinitions = [
             derivativeId: { type: 'string' },
             pageIndex: { type: 'integer', minimum: 0 },
             motifId: { type: 'string' },
+            coordinateSpace: coordinateSpaceSchema,
+            layerName: layerNameSchema,
             shapes: {
                 type: 'array',
                 items: schema({
@@ -287,11 +438,15 @@ const derivativeToolDefinitions = [
                     fillSwatch: { type: 'string' },
                     strokeSwatch: { type: 'string' },
                     strokeWeight: { type: 'number' },
-                    opacity: { type: 'number' }
+                    opacity: { type: 'number' },
+                    coordinateSpace: coordinateSpaceSchema,
+                    layerName: { type: 'string' },
+                    ...boundsValidationSchemaProps
                 }, ['shapeType'])
             },
             group: { type: 'boolean' },
-            label: labelObjectSchema
+            label: labelObjectSchema,
+            ...boundsValidationSchemaProps
         }, ['derivativeId', 'pageIndex', 'motifId', 'shapes'])
     },
     {
@@ -326,7 +481,8 @@ const derivativeToolDefinitions = [
 
 const primitiveToolDefinitions = [
     { name: 'init_template_workspace', description: 'Initialize template workspace and copy original INDD into input/work.', inputSchema: schema({ originalInddPath: { type: 'string', description: 'Existing source .indd file.' }, workspaceRoot: { type: 'string' }, overwriteExistingWorkspace: { type: 'boolean', default: false } }, ['originalInddPath', 'workspaceRoot']) },
-    { name: 'copy_original_to_workspace', description: 'Verify existing workspace copies or alias workspace init.', inputSchema: { ...schema({ originalInddPath: { type: 'string', description: 'Existing source .indd file.' }, workspaceRoot: { type: 'string' }, overwriteExistingWorkspace: { type: 'boolean', default: false }, verifyOnly: { type: 'boolean', default: true } }), anyOf: [{ required: [] }, { required: ['originalInddPath', 'workspaceRoot'] }] } },
+    { name: 'attach_template_workspace', description: 'Attach an existing template workspace and rehydrate state after restart.', inputSchema: schema({ workspaceRoot: { type: 'string', description: 'Existing template workspace root containing manifest.json.' } }, ['workspaceRoot']) },
+    { name: 'copy_original_to_workspace', description: 'Verify existing workspace copies or alias workspace init.', inputSchema: { ...schema({ originalInddPath: { type: 'string', description: 'Existing source .indd file.' }, workspaceRoot: { type: 'string' }, overwriteExistingWorkspace: { type: 'boolean', default: false }, verifyOnly: { type: 'boolean', default: true } }), anyOf: [{ required: ['workspaceRoot'] }, { required: ['originalInddPath', 'workspaceRoot'] }] } },
     { name: 'open_working_copy', description: 'Open current workspace working copy.', inputSchema: schema({}) },
     { name: 'get_workspace_status', description: 'Inspect template workspace status.', inputSchema: schema({}) },
     { name: 'save_working_copy', description: 'Save current workspace working copy.', inputSchema: schema({}) },
@@ -346,16 +502,16 @@ const primitiveToolDefinitions = [
     { name: 'return_preview_as_image', description: 'Return a stored preview as base64 image data.', inputSchema: schema({ previewId: { type: 'string' }, path: { type: 'string', description: 'Path under previews/.' } }, [], { anyOf: [{ required: ['previewId'] }, { required: ['path'] }] }) },
     { name: 'create_page', description: 'Create a page for template work.', inputSchema: { ...schema({ pageWidth: { type: 'number', exclusiveMinimum: 0 }, pageHeight: { type: 'number', exclusiveMinimum: 0 }, width: { type: 'number', exclusiveMinimum: 0 }, height: { type: 'number', exclusiveMinimum: 0 }, pageSize: { type: 'string', enum: ['A5', 'A3', 'social_square'] }, orientation: { type: 'string', enum: ['portrait', 'landscape'] }, unit: unitSchema, name: { type: 'string' }, derivativeId: { type: 'string' }, marginTop: { type: 'number', minimum: 0 }, marginBottom: { type: 'number', minimum: 0 }, marginLeft: { type: 'number', minimum: 0 }, marginRight: { type: 'number', minimum: 0 } }), anyOf: [{ required: ['pageWidth', 'pageHeight'] }, { required: ['width', 'height'] }, { required: ['pageSize'] }] } },
     { name: 'duplicate_page', description: 'Duplicate a page in the active working copy.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, derivativeId: { type: 'string' }, name: { type: 'string' } }, ['pageIndex']) },
-    { name: 'create_text_frame', description: 'Create a text frame on a specific page.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, bounds: boundsSchema, unit: unitSchema, text: { type: 'string', default: '' }, content: { type: 'string' }, name: { type: 'string' }, label: labelObjectSchema, paragraphStyle: { type: 'string' }, characterStyle: { type: 'string' }, objectStyle: { type: 'string' }, fillSwatch: { type: 'string' }, strokeSwatch: { type: 'string' }, strokeWeight: { type: 'number', minimum: 0 } }, ['pageIndex', 'bounds']) },
-    { name: 'create_image_frame', description: 'Create an image frame or placeholder on a specific page.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, bounds: boundsSchema, unit: unitSchema, imagePath: { type: 'string', description: 'Path under workspace assets/ or input/.' }, filePath: { type: 'string', description: 'Alias for imagePath under workspace assets/ or input/.' }, placeholder: { type: 'boolean', default: true }, fitMode: fitModeSchema, name: { type: 'string' }, label: labelObjectSchema, objectStyle: { type: 'string' }, fillSwatch: { type: 'string' }, strokeSwatch: { type: 'string' }, strokeWeight: { type: 'number', minimum: 0 } }, ['pageIndex', 'bounds']) },
-    { name: 'create_shape', description: 'Create a primitive shape on a specific page.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, bounds: boundsSchema, shapeType: { type: 'string', enum: ['rectangle', 'oval', 'polygon'] }, unit: unitSchema, name: { type: 'string' }, label: labelObjectSchema, objectStyle: { type: 'string' }, fillSwatch: { type: 'string' }, strokeSwatch: { type: 'string' }, strokeWeight: { type: 'number', minimum: 0 } }, ['pageIndex', 'bounds', 'shapeType']) },
-    { name: 'create_line', description: 'Create a line on a specific page.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, start: pointSchema, end: pointSchema, unit: unitSchema, name: { type: 'string' }, label: labelObjectSchema, objectStyle: { type: 'string' }, strokeSwatch: { type: 'string' }, strokeWeight: { type: 'number', minimum: 0 } }, ['pageIndex', 'start', 'end']) },
+    { name: 'create_text_frame', description: 'Create a text frame on a specific page.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, bounds: boundsSchema, unit: unitSchema, coordinateSpace: coordinateSpaceSchema, layerName: layerNameSchema, text: { type: 'string', default: '' }, content: { type: 'string' }, name: { type: 'string' }, label: labelObjectSchema, paragraphStyle: { type: 'string' }, characterStyle: { type: 'string' }, objectStyle: { type: 'string' }, fillSwatch: { type: 'string' }, strokeSwatch: { type: 'string' }, strokeWeight: { type: 'number', minimum: 0 }, ...boundsValidationSchemaProps }, ['pageIndex', 'bounds']) },
+    { name: 'create_image_frame', description: 'Create an image frame or placeholder on a specific page.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, bounds: boundsSchema, unit: unitSchema, coordinateSpace: coordinateSpaceSchema, layerName: layerNameSchema, imagePath: { type: 'string', description: 'Path under workspace assets/ or input/.' }, filePath: { type: 'string', description: 'Alias for imagePath under workspace assets/ or input/.' }, placeholder: { type: 'boolean', default: true }, fitMode: fitModeSchema, name: { type: 'string' }, label: labelObjectSchema, objectStyle: { type: 'string' }, fillSwatch: { type: 'string' }, strokeSwatch: { type: 'string' }, strokeWeight: { type: 'number', minimum: 0 }, ...boundsValidationSchemaProps }, ['pageIndex', 'bounds']) },
+    { name: 'create_shape', description: 'Create a primitive shape on a specific page.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, bounds: boundsSchema, shapeType: { type: 'string', enum: ['rectangle', 'oval', 'polygon'] }, unit: unitSchema, coordinateSpace: coordinateSpaceSchema, layerName: layerNameSchema, name: { type: 'string' }, label: labelObjectSchema, objectStyle: { type: 'string' }, fillSwatch: { type: 'string' }, strokeSwatch: { type: 'string' }, strokeWeight: { type: 'number', minimum: 0 }, ...boundsValidationSchemaProps }, ['pageIndex', 'bounds', 'shapeType']) },
+    { name: 'create_line', description: 'Create a line on a specific page.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, start: pointSchema, end: pointSchema, unit: unitSchema, coordinateSpace: coordinateSpaceSchema, layerName: layerNameSchema, name: { type: 'string' }, label: labelObjectSchema, objectStyle: { type: 'string' }, strokeSwatch: { type: 'string' }, strokeWeight: { type: 'number', minimum: 0 }, ...boundsValidationSchemaProps }, ['pageIndex', 'start', 'end']) },
     { name: 'apply_styles', description: 'Apply paragraph, character, or object styles to one object.', inputSchema: targetedSchema({ paragraphStyle: { type: 'string' }, characterStyle: { type: 'string' }, objectStyle: { type: 'string' }, clearOverrides: { type: 'boolean', default: false } }) },
     { name: 'apply_swatches', description: 'Apply fill, stroke, and text swatches to one object.', inputSchema: targetedSchema({ fillSwatch: { type: 'string' }, strokeSwatch: { type: 'string' }, strokeWeight: { type: 'number' }, textFillSwatch: { type: 'string' }, textStrokeSwatch: { type: 'string' } }) },
     { name: 'set_text_content', description: 'Set text content on one targeted text object.', inputSchema: targetedSchema({ text: { type: 'string' } }, ['text']) },
-    { name: 'set_bounds', description: 'Set absolute bounds on one targeted object.', inputSchema: targetedSchema({ bounds: boundsSchema, unit: unitSchema, preserveCenter: { type: 'boolean', default: false }, preserveAspectRatio: { type: 'boolean', default: false }, anchor: { type: 'string', enum: ['topLeft', 'center', 'bottomRight'], default: 'topLeft' }, roundTo: { type: 'number', exclusiveMinimum: 0 }, returnBeforeAfter: { type: 'boolean', default: false } }, ['bounds']) },
+    { name: 'set_bounds', description: 'Set absolute bounds on one targeted object.', inputSchema: targetedSchema({ bounds: boundsSchema, unit: unitSchema, pageIndex: { type: 'integer', minimum: 0 }, coordinateSpace: coordinateSpaceSchema, preserveCenter: { type: 'boolean', default: false }, preserveAspectRatio: { type: 'boolean', default: false }, anchor: { type: 'string', enum: ['topLeft', 'center', 'bottomRight'], default: 'topLeft' }, roundTo: { type: 'number', exclusiveMinimum: 0 }, returnBeforeAfter: { type: 'boolean', default: false }, ...boundsValidationSchemaProps }, ['bounds']) },
     { name: 'move_item', description: 'Move one targeted object by delta.', inputSchema: targetedSchema({ delta: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'number' }, description: '[topOffset,leftOffset] in unit.' }, unit: unitSchema }, ['delta']) },
-    { name: 'resize_item', description: 'Resize one targeted object to absolute bounds.', inputSchema: targetedSchema({ bounds: boundsSchema, unit: unitSchema, preserveCenter: { type: 'boolean', default: false }, preserveAspectRatio: { type: 'boolean', default: false }, anchor: { type: 'string', enum: ['topLeft', 'center', 'bottomRight'], default: 'topLeft' }, roundTo: { type: 'number', exclusiveMinimum: 0 }, returnBeforeAfter: { type: 'boolean', default: false } }, ['bounds']) },
+    { name: 'resize_item', description: 'Resize one targeted object to absolute bounds.', inputSchema: targetedSchema({ bounds: boundsSchema, unit: unitSchema, pageIndex: { type: 'integer', minimum: 0 }, coordinateSpace: coordinateSpaceSchema, preserveCenter: { type: 'boolean', default: false }, preserveAspectRatio: { type: 'boolean', default: false }, anchor: { type: 'string', enum: ['topLeft', 'center', 'bottomRight'], default: 'topLeft' }, roundTo: { type: 'number', exclusiveMinimum: 0 }, returnBeforeAfter: { type: 'boolean', default: false }, ...boundsValidationSchemaProps }, ['bounds']) },
     { name: 'rotate_item', description: 'Rotate one targeted object.', inputSchema: targetedSchema({ degrees: { type: 'number' } }, ['degrees']) },
     { name: 'lock_item', description: 'Lock one targeted object.', inputSchema: targetedSchema() },
     { name: 'unlock_item', description: 'Unlock one targeted object.', inputSchema: targetedSchema() },
@@ -371,7 +527,7 @@ const primitiveToolDefinitions = [
     { name: 'get_object_label', description: 'Read semantic label JSON from one object.', inputSchema: targetedSchema() },
     { name: 'find_objects_by_label', description: 'Find objects whose semantic labels match a query.', inputSchema: schema({ labelQuery: labelQuerySchema, includeHidden: { type: 'boolean', default: false }, namePrefix: { type: 'string' }, pageIndex: { type: 'integer', minimum: 0 } }, ['labelQuery']) },
     { name: 'list_named_objects', description: 'List named objects, optionally filtered by label query.', inputSchema: schema({ namePrefix: { type: 'string' }, labelQuery: labelQuerySchema, includeHidden: { type: 'boolean', default: false }, pageIndex: { type: 'integer', minimum: 0 } }) },
-    { name: 'create_reference_underlay', description: 'Create a non-printing reference image underlay.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, bounds: boundsSchema, imagePath: { type: 'string', description: 'Path under workspace assets/ or input/.' }, filePath: { type: 'string', description: 'Alias for imagePath under workspace assets/ or input/.' }, unit: unitSchema, name: { type: 'string' }, label: labelObjectSchema, layerName: { type: 'string', default: 'REFERENCE_UNDERLAY' }, lockLayer: { type: 'boolean', default: true } }, ['pageIndex', 'bounds'], { anyOf: [{ required: ['pageIndex', 'bounds', 'imagePath'] }, { required: ['pageIndex', 'bounds', 'filePath'] }] }) },
+    { name: 'create_reference_underlay', description: 'Create a non-printing reference image underlay.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, bounds: boundsSchema, imagePath: { type: 'string', description: 'Path under workspace assets/ or input/.' }, filePath: { type: 'string', description: 'Alias for imagePath under workspace assets/ or input/.' }, unit: unitSchema, coordinateSpace: coordinateSpaceSchema, name: { type: 'string' }, label: labelObjectSchema, layerName: { type: 'string', default: 'REFERENCE_UNDERLAY' }, lockLayer: { type: 'boolean', default: true }, ...boundsValidationSchemaProps }, ['pageIndex', 'bounds'], { anyOf: [{ required: ['pageIndex', 'bounds', 'imagePath'] }, { required: ['pageIndex', 'bounds', 'filePath'] }] }) },
     { name: 'hide_reference_underlay', description: 'Hide the reference underlay layer.', inputSchema: schema({ layerName: { type: 'string', default: 'REFERENCE_UNDERLAY' } }) },
     { name: 'remove_reference_underlay', description: 'Remove reference underlay items or the whole layer.', inputSchema: schema({ layerName: { type: 'string', default: 'REFERENCE_UNDERLAY' }, removeLayer: { type: 'boolean', default: true } }) },
     { name: 'record_visual_review', description: 'Record visual review notes for a derivative.', inputSchema: schema({ derivativeId: { type: 'string' }, targetPreviewId: { type: 'string' }, indesignPreviewId: { type: 'string' }, brief: { type: 'string', default: '' }, issues: { type: 'array', items: {} }, suggestedFixes: { type: 'array', items: {} } }, ['derivativeId']) },

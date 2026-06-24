@@ -574,10 +574,18 @@ export class PageHandlers {
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) return { success: false, error: 'Page index out of range' };
             const page = doc.pages.item(${pageIndex});
             const pageBounds = page.bounds;
-            const pageWidth = pageBounds[3] - pageBounds[1];
-            const pageHeight = pageBounds[2] - pageBounds[0];
+            let layer = doc.layers.itemByName('BACKGROUND');
+            if (!layer || layer.isValid === false) layer = doc.layers.add({ name: 'BACKGROUND' });
+            layer.visible = true;
+            layer.locked = false;
             const backgroundRect = page.rectangles.add();
-            backgroundRect.geometricBounds = [0, 0, pageHeight, pageWidth];
+            backgroundRect.itemLayer = layer;
+            backgroundRect.geometricBounds = [
+                pageBounds[0],
+                pageBounds[1],
+                pageBounds[2],
+                pageBounds[3]
+            ];
             const colorName = ${JSON.stringify(backgroundColor)};
             if (colorName !== 'White') {
                 try {

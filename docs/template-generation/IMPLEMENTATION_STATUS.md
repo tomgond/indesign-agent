@@ -8,6 +8,11 @@ No live Mac/InDesign/UXP plugin validation has been run. Anything that depends o
 
 These pieces are complete enough for Node-side use and have local checks:
 
+- Durable active-workspace pointer at `~/.indesign-agent/active-workspace.json` plus `attach_template_workspace` reattach flow.
+- Default `INDESIGN_TOOL_PROFILE=template`, so template mode no longer lists conflicting generic open/save/create/export tools.
+- Template page-local coordinate conversion and bounds validation wiring for core creation/bounds tools.
+- Derivative identity persistence with `pageId`/`pageBounds` plus nonprinting page marker fallback.
+- Roundtrip/finalization tools: `resolve_derivative_page`, `inspect_page_geometry`, `verify_template_roundtrip`, `finalize_derivative`, `build_derivative_from_recipe`.
 - Streamable HTTP MCP transport at `/mcp`.
 - `GET /health`.
 - `GET /bridge-status` using the configured bridge `/status` endpoint only.
@@ -142,6 +147,14 @@ Still pending: live Mac/InDesign retest after deployment and deeper fixture-driv
 3. Replace registered-failing tools with real guarded UXP snippets.
 4. Run `tests/test-template-mvp-flow.js` with `RUN_TEMPLATE_LIVE=1` against a real `.indd` fixture and real asset file to prove the end-to-end derivative flow.
 5. Run the full three-derivative flow on a real `.indd` fixture and fix DOM/version differences.
+
+## Geometry canary command
+
+Run this only with a real bridge/plugin/InDesign session:
+
+```bash
+RUN_TEMPLATE_LIVE=1 TEMPLATE_BASE_INDD="/absolute/path/to/base.indd" TEMPLATE_WORKSPACE_ROOT="/absolute/path/to/workspace" node scripts/template-geometry-canary.mjs
+```
 
 ## Documentation sources to use next
 
