@@ -52,9 +52,9 @@ export const screenshotToolDefinitions = [
                 },
                 zoomMode: {
                     type: 'string',
-                    enum: ['fit_page', 'fit_spread', 'actual_size', 'none'],
+                    enum: ['fit_page', 'fit_spread', 'none'],
                     default: 'fit_page',
-                    description: 'Zoom behavior after navigation. fit_page = fit page to window. fit_spread = fit spread to window. actual_size = 100% zoom. none = no zoom change.',
+                    description: 'Zoom behavior after navigation. fit_page = use the existing page-fit zoom behavior. fit_spread = currently unsupported and returns a clear error. none = no zoom change.',
                 },
                 delayMs: {
                     type: 'integer',

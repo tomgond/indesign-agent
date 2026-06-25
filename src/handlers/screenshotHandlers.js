@@ -111,7 +111,7 @@ export class ScreenshotHandlers {
         }
 
         // zoomMode: optional, must be valid enum value
-        const validZoomModes = ['fit_page', 'fit_spread', 'actual_size', 'none'];
+        const validZoomModes = ['fit_page', 'fit_spread', 'none'];
         if (args.zoomMode !== undefined && args.zoomMode !== null) {
             if (!validZoomModes.includes(args.zoomMode)) {
                 return formatErrorResponse(
@@ -310,7 +310,7 @@ $bmp.Dispose();
      * fit/zoom, then take an OS-level screenshot.
      *
      * Navigation reuses PageHandlers.navigateToPage (proven UXP code path).
-     * Zoom reuses DocumentHandlers.zoomToPage for fit_page/actual_size.
+     * Zoom reuses DocumentHandlers.zoomToPage for fit_page.
      * fit_spread is not supported by the existing zoom handler.
      * No InDesign export APIs are used.
      */
@@ -329,7 +329,7 @@ $bmp.Dispose();
             if (zoomMode === 'fit_spread') {
                 return formatErrorResponse(
                     'zoomMode "fit_spread" is not supported by the existing zoom handler. ' +
-                    'Use "fit_page", "actual_size", or "none" instead.',
+                    'Use "fit_page" or "none" instead.',
                     operation
                 );
             }
@@ -352,16 +352,6 @@ $bmp.Dispose();
                         if (!fitResult?.success) {
                             return formatErrorResponse(
                                 fitResult?.result || 'Failed to zoom to page',
-                                operation
-                            );
-                        }
-                        break;
-
-                    case 'actual_size':
-                        const actualResult = await DocumentHandlers.zoomToPage({ pageIndex, zoomLevel: 100 });
-                        if (!actualResult?.success) {
-                            return formatErrorResponse(
-                                actualResult?.result || 'Failed to set actual size zoom',
                                 operation
                             );
                         }

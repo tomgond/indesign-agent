@@ -111,6 +111,11 @@ For agent visual loops, **use `capture_indesign_screen_preview`** instead of exp
 - `capture_screen_preview` — Raw OS-level screenshot (PNG). No InDesign interaction.
 - `capture_indesign_screen_preview` — Navigate InDesign to a page, optionally zoom, then capture.
 
+**`capture_indesign_screen_preview` zoomMode:**
+- `fit_page`: navigate to the page and apply the repo's existing page-fit zoom behavior.
+- `none`: navigate only, preserving current zoom.
+- `fit_spread`: reserved but currently unsupported; the tool returns a clear error.
+
 **Important:**
 - Screenshots are OS-level (`screencapture` on macOS, PowerShell+WinForms on Windows, gnome-screenshot/import/grim on Linux). No InDesign export APIs are called.
 - On macOS, Screen Recording permission may be required for Terminal/the MCP process (System Settings > Privacy & Security > Screen Recording).

@@ -128,6 +128,9 @@ async function runTests() {
     r = ScreenshotHandlers.validateInDesignArgs({ outputPath: '/tmp/test.png', pageIndex: 0.5 }, op);
     assertErrorResponse(r, 'float pageIndex rejected', 'non-negative integer');
 
+    r = ScreenshotHandlers.validateInDesignArgs({ outputPath: '/tmp/test.png', pageIndex: 0, zoomMode: 'actual_size' }, op);
+    assertErrorResponse(r, 'actual_size rejected', 'zoomMode');
+
     r = ScreenshotHandlers.validateInDesignArgs({ outputPath: '/tmp/test.png', pageIndex: 0, zoomMode: 'fit_document' }, op);
     assertErrorResponse(r, 'invalid zoomMode rejected', 'zoomMode');
 
