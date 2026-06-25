@@ -1,0 +1,55 @@
+diff --git a/src/handlers/templateHandlers.js b/src/handlers/templateHandlers.js
+index 0000000..0000000 100644
+--- a/src/handlers/templateHandlers.js
++++ b/src/handlers/templateHandlers.js
+@@ -284,7 +416,45 @@ function layoutAndLabels(name) {
+     return `
+         const n = ${q(name)};
+         let it, old;
+-        if (n === 'create_page') { const p = doc.pages.add(); if (args.name) p.name=args.name; return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null }; }
++        function pagePresetSize(name) {
++            const k = String(name || '').toLowerCase();
++            if (k === 'a5') return { width: 148, height: 210, unit: 'mm' };
++            if (k === 'a3') return { width: 297, height: 420, unit: 'mm' };
++            if (k === 'square') return { width: 210, height: 210, unit: 'mm' };
++            if (k === 'social_square') return { width: 1080, height: 1080, unit: 'pt' };
++            return null;
++        }
++        function pageDims(args) {
++            let w = args.pageWidth ?? args.width;
++            let h = args.pageHeight ?? args.height;
++            let u = args.unit || 'pt';
++            const preset = pagePresetSize(args.pageSize);
++            if (preset) { w = preset.width; h = preset.height; u = preset.unit; }
++            if (w == null && h == null) return null;
++            if (!(Number.isFinite(Number(w)) && Number.isFinite(Number(h)))) throw new Error('pageWidth/pageHeight must be finite numbers');
++            w = toPt(Number(w), u);
++            h = toPt(Number(h), u);
++            if (w <= 0 || h <= 0) throw new Error('pageWidth/pageHeight must be positive');
++            if (args.orientation === 'landscape' && h > w) { const t = w; w = h; h = t; }
++            if (args.orientation === 'portrait' && w > h) { const t = w; w = h; h = t; }
++            return { width:w, height:h };
++        }
++        function applyPageMargins(p,args) {
++            if (args.marginTop == null && args.marginBottom == null && args.marginLeft == null && args.marginRight == null) return null;
++            const m = p.marginPreferences;
++            if (args.marginTop != null) m.top = toPt(Number(args.marginTop), args.unit || 'pt');
++            if (args.marginBottom != null) m.bottom = toPt(Number(args.marginBottom), args.unit || 'pt');
++            if (args.marginLeft != null) m.left = toPt(Number(args.marginLeft), args.unit || 'pt');
++            if (args.marginRight != null) m.right = toPt(Number(args.marginRight), args.unit || 'pt');
++            return { top:safe(()=>m.top), bottom:safe(()=>m.bottom), left:safe(()=>m.left), right:safe(()=>m.right) };
++        }
++        if (n === 'create_page') {
++            const p = doc.pages.add();
++            if (args.name) p.name=args.name;
++            const dims = pageDims(args);
++            if (dims) {
++                if (!p.adjustLayout) throw new Error('Page.adjustLayout is not available; cannot safely set per-page size');
++                p.adjustLayout({ width:dims.width, height:dims.height });
++            }
++            const margins = applyPageMargins(p,args);
++            return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null, pageSize:safe(()=>({ width:p.bounds[3]-p.bounds[1], height:p.bounds[2]-p.bounds[0] }), dims), margins };
++        }
+         if (n === 'duplicate_page') { const src=at(doc.pages,args.pageIndex||0); const p=src.duplicate(); return { success:true, pageIndex:len(doc.pages)-1, name:safe(()=>p.name), derivativeId:args.derivativeId||null }; }
+         if (n === 'create_text_frame') { const p=at(doc.pages,args.pageIndex||0); it=p.textFrames.add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); it.contents=args.text||''; applyBasics(it,args); applyTextStyles(it,args); return { success:true, ...meta(it), unit:'pt', text:{excerpt:String(it.contents).slice(0,500), overset:safe(()=>it.overflows,false)} }; }
+         if (n === 'create_image_frame' || n === 'create_shape') { const p=at(doc.pages,args.pageIndex||0); const type=args.shapeType||'rectangle'; it=(type==='oval'?p.ovals:type==='polygon'?p.polygons:p.rectangles).add(); it.geometricBounds=boundsInPt(args.bounds,args.unit); applyBasics(it,args); if(n==='create_image_frame' && args.imagePath){ it.place(args.imagePath, false); } return { success:true, ...meta(it), unit:'pt', link:safe(()=>({ name:it.graphics.item(0).itemLink.name, status:String(it.graphics.item(0).itemLink.status), path:it.graphics.item(0).itemLink.filePath }), null) }; }

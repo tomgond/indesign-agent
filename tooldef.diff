@@ -1,0 +1,24 @@
+diff --git a/src/types/toolDefinitionsTemplate.js b/src/types/toolDefinitionsTemplate.js
+index 0000000..0000000 100644
+--- a/src/types/toolDefinitionsTemplate.js
++++ b/src/types/toolDefinitionsTemplate.js
+@@ -28,13 +28,22 @@ export const templateToolDefinitions = names.map((name) => ({
+         properties: {
+             originalInddPath: { type: 'string' }, workspaceRoot: { type: 'string' }, overwriteExistingWorkspace: { type: 'boolean' },
+             path: { type: 'string' }, kind: { type: 'string' }, versionId: { type: 'string' }, label: {}, derivativeId: { type: 'string' },
+-            pageIndex: { type: 'number' }, spreadIndex: { type: 'number' }, objectId: { type: 'number' }, objectIds: { type: 'array', items: { type: 'number' } }, groupId: { type: 'number' }, itemId: { type: 'number' }, name: { type: 'string' }, namePrefix: { type: 'string' }, bounds: { type: 'array' }, unit: { type: 'string', enum: ['pt', 'mm'] }, text: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' },
++            pageIndex: { type: 'number' },
++            spreadIndex: { type: 'number' },
++            includeTextExcerpt: { type: 'boolean' },
++            includeParentItems: { type: 'boolean' },
++            objectId: { type: 'number' }, objectIds: { type: 'array', items: { type: 'number' } }, groupId: { type: 'number' }, itemId: { type: 'number' }, name: { type: 'string' }, namePrefix: { type: 'string' },
++            bounds: { type: 'array' }, unit: { type: 'string', enum: ['pt', 'mm'] }, text: { type: 'string' },
++            width: { type: 'number' }, height: { type: 'number' },
++            pageWidth: { type: 'number' }, pageHeight: { type: 'number' },
++            pageSize: { type: 'string', enum: ['A5', 'A3', 'square', 'social_square'] },
++            orientation: { type: 'string', enum: ['portrait', 'landscape'] },
++            marginTop: { type: 'number' }, marginBottom: { type: 'number' }, marginLeft: { type: 'number' }, marginRight: { type: 'number' },
+             shapeType: { type: 'string' }, start: { type: 'array' }, end: { type: 'array' }, delta: { type: 'array' }, degrees: { type: 'number' },
+             imagePath: { type: 'string' }, filePath: { type: 'string' }, fitMode: { type: 'string' },
+             paragraphStyle: { type: 'string' }, characterStyle: { type: 'string' }, objectStyle: { type: 'string' }, clearOverrides: { type: 'boolean' },
+             fillSwatch: { type: 'string' }, strokeSwatch: { type: 'string' }, strokeWeight: { type: 'number' }, textFillSwatch: { type: 'string' }, textStrokeSwatch: { type: 'string' },

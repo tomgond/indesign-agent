@@ -99,14 +99,12 @@ function drainQueue() {
 
   pending.set(id, {
     resolve: (result) => {
-      const bridgeExecutionMs = Date.now() - now;
       activeRequest = null;
       processingQueue = false;
       resolve(result);
       drainQueue();
     },
     reject: (err) => {
-      const bridgeExecutionMs = Date.now() - now;
       activeRequest = null;
       processingQueue = false;
       reject(err);
@@ -319,7 +317,7 @@ app.post('/execute', async (req, res) => {
       responseBytes,
       ok: true
     });
-    res.json({ result });
+    res.type('application/json').send(resultStr);
   } catch (err) {
     const errorBody = JSON.stringify({ error: err.message });
     const responseBytes = Buffer.byteLength(errorBody, 'utf8');

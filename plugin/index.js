@@ -3,8 +3,17 @@ const { entrypoints } = require("uxp");
 
 const statusEl = document.getElementById("status");
 
-// ponytail: Named constant, not env-var (UXP has no process.env). Change here if needed.
+// Named constant; UXP has no process.env so change here if needed.
 const PLUGIN_TIMEOUT_MS = 25000;
+
+function byteLength(value) {
+  const str = String(value || '');
+  try {
+    return new Blob([str]).size;
+  } catch {
+    return str.length;
+  }
+}
 
 function logEvent(fields) {
   const entry = { ts: new Date().toISOString(), component: "Plugin", ...fields };
@@ -38,7 +47,7 @@ function sandboxedRequire(moduleName) {
 
 async function handleExecute(ws, msg) {
   const { id, code, traceId, toolName, phase } = msg;
-  const codeBytes = Buffer.byteLength(code || '', 'utf8');
+  const codeBytes = byteLength(code || '');
   let timerId;
 
   logEvent({
@@ -72,7 +81,7 @@ async function handleExecute(ws, msg) {
     const serializeMs = Date.now() - serStart;
 
     const payload = JSON.stringify({ type: 'result', id, result: serialized });
-    const resultBytes = Buffer.byteLength(payload, 'utf8');
+    const resultBytes = byteLength(payload);
 
     const sendStart = Date.now();
     ws.send(payload);

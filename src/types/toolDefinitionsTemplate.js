@@ -323,7 +323,10 @@ const derivativeToolDefinitions = [
     {
         name: 'get_document_stress_summary',
         description: 'Return document stress counts only (pages, items, links, fonts, layers). Much faster than inspect_document_bundle. Use to predict timeout risk before running deep tools.',
-        inputSchema: schema({})
+        inputSchema: schema({
+            diagnostics: { type: 'boolean', default: false },
+            traceId: { type: 'string' }
+        })
     },
     {
         name: 'verify_template_roundtrip',
@@ -336,7 +339,9 @@ const derivativeToolDefinitions = [
                 requirePreview: { type: 'boolean', default: true },
                 requireNoOverset: { type: 'boolean', default: true },
                 requireNoMissingLinks: { type: 'boolean', default: false },
-                overwritePreview: { type: 'boolean', default: true }
+                overwritePreview: { type: 'boolean', default: true },
+                diagnostics: { type: 'boolean', default: false },
+                traceId: { type: 'string' }
             }),
             anyOf: [{ required: ['derivativeId'] }, { required: ['pageIndex'] }]
         }
@@ -351,7 +356,9 @@ const derivativeToolDefinitions = [
             requireNoOverset: { type: 'boolean', default: true },
             requireNoMissingLinks: { type: 'boolean', default: false },
             saveVersion: { type: 'boolean', default: true },
-            versionLabel: { type: 'string' }
+            versionLabel: { type: 'string' },
+            diagnostics: { type: 'boolean', default: false },
+            traceId: { type: 'string' }
         }, ['derivativeId'])
     },
     {

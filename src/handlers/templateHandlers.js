@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { ScriptExecutor } from '../core/scriptExecutor.js';
 import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
 import { initWorkspace, attachWorkspace, loadWorkspace, getWorkspace, saveWorkspace, nextVersionId, upsertDerivative, upsertDerivativePage, fileStatEvidence, validateWorkspaceFiles } from '../core/workspaceState.js';
@@ -10,7 +11,7 @@ const LABEL_KEY = 'mcpTemplateLabel';
 
 // Trace and timing helpers — used by composed template tools
 function generateTraceId() {
-    return require('node:crypto').randomUUID();
+    return crypto.randomUUID();
 }
 
 function logPhase(fields) {
@@ -145,7 +146,7 @@ function activeGuardCode(body) {
 async function runGuarded(body, options = {}) {
     const { trace, ...rest } = options;
     const execMeta = trace ? { traceId: trace.traceId, toolName: trace.toolName, phase: rest.phase || trace.phase } : {};
-    await TemplateHandlers.ensureTemplateReady(rest);
+    await TemplateHandlers.ensureTemplateReady({ ...rest, trace });
     const result = await ScriptExecutor.executeViaUXP(activeGuardCode(body), execMeta);
     if (result?.success === false) throw new Error(result.error || 'Template tool failed');
     return result;
@@ -1114,39 +1115,40 @@ export class TemplateHandlers {
             const traceId = args.diagnostics ? (args.traceId || generateTraceId()) : null;
             const trace = traceId ? { traceId, toolName: 'run_derivative_checks' } : null;
             const phases = [];
-            const diagnostics = {};
+            const naTrace = { traceId: 'na', toolName: 'run_derivative_checks' };
 
             function recordPhase(phase, durationMs, ok, extra = {}) {
                 if (traceId) phases.push({ phase, durationMs, ok, ...extra });
             }
 
-            // Phase: resolve_derivative_page
-            const phaseStart = Date.now();
-            let resolved;
-            try {
-                resolved = unwrapToolResult(
-                    args.derivativeId
-                        ? await timedPhase(trace || { traceId: 'na', toolName: 'run_derivative_checks' }, 'resolve_derivative_page', () => this.resolve_derivative_page({ derivativeId: args.derivativeId, trace }))
-                        : await timedPhase(trace || { traceId: 'na', toolName: 'run_derivative_checks' }, 'resolve_derivative_page', () => this.resolve_derivative_page({ pageIndex: args.pageIndex, trace }))
-                );
-                recordPhase('resolve_derivative_page', Date.now() - phaseStart, true);
-            } catch (e) {
-                recordPhase('resolve_derivative_page', Date.now() - phaseStart, false);
-                throw e;
+            async function runPhase(phase, fn) {
+                const start = Date.now();
+                try {
+                    const result = await timedPhase(trace || naTrace, phase, fn);
+                    recordPhase(phase, Date.now() - start, true);
+                    return result;
+                } catch (error) {
+                    recordPhase(phase, Date.now() - start, false, { error: error.message });
+                    throw error;
+                }
             }
+
+            const resolved = unwrapToolResult(await runPhase('resolve_derivative_page', () =>
+                args.derivativeId
+                    ? this.resolve_derivative_page({ derivativeId: args.derivativeId, trace })
+                    : this.resolve_derivative_page({ pageIndex: args.pageIndex, trace })
+            ));
             const pageIndex = resolved.pageIndex;
 
-            // Phase: inspect_page_items_v2 — use summary mode for efficiency
-            const inspectPhaseStart = Date.now();
-            let itemsResult;
-            try {
-                const inspectArgs = { pageIndex, includeHidden: true, includeTextExcerpt: args.includeOversetExcerpt === true, detailLevel: 'summary', trace };
-                itemsResult = await timedPhase(trace || { traceId: 'na', toolName: 'run_derivative_checks' }, 'inspect_page_items_v2', () => this.inspectPageItemsRaw(inspectArgs));
-                recordPhase('inspect_page_items_v2', Date.now() - inspectPhaseStart, true);
-            } catch (e) {
-                recordPhase('inspect_page_items_v2', Date.now() - inspectPhaseStart, false);
-                throw e;
-            }
+            const itemsResult = await runPhase('inspect_page_items_v2', () =>
+                this.inspectPageItemsRaw({
+                    pageIndex,
+                    includeHidden: true,
+                    includeTextExcerpt: args.includeOversetExcerpt === true,
+                    detailLevel: 'summary',
+                    trace
+                })
+            );
 
             const objects = (itemsResult.items || []).filter((item) => !(item.label?.role === 'page_marker' || item.label?.metadata === true));
             const oversetIssues = objects.filter((item) => item.text?.overset).map((item) => ({ objectId: item.objectId, name: item.name, evidence: item.text.excerpt || null }));
@@ -1160,27 +1162,13 @@ export class TemplateHandlers {
             // Phase: check_missing_links (document-global, opt-in)
             let linksResult = null;
             if (shouldCheckLinks) {
-                const linkPhaseStart = Date.now();
-                try {
-                    linksResult = await timedPhase(trace || { traceId: 'na', toolName: 'run_derivative_checks' }, 'check_missing_links', () => this.uxpTool('check_missing_links', { trace }));
-                    recordPhase('check_missing_links', Date.now() - linkPhaseStart, true);
-                } catch (e) {
-                    recordPhase('check_missing_links', Date.now() - linkPhaseStart, false);
-                    throw e;
-                }
+                linksResult = await runPhase('check_missing_links', () => this.uxpTool('check_missing_links', { trace }));
             }
 
             // Phase: check_missing_fonts (document-global, opt-in)
             let fontsResult = null;
             if (shouldCheckFonts) {
-                const fontPhaseStart = Date.now();
-                try {
-                    fontsResult = await timedPhase(trace || { traceId: 'na', toolName: 'run_derivative_checks' }, 'check_missing_fonts', () => this.uxpTool('check_missing_fonts', { trace }));
-                    recordPhase('check_missing_fonts', Date.now() - fontPhaseStart, true);
-                } catch (e) {
-                    recordPhase('check_missing_fonts', Date.now() - fontPhaseStart, false);
-                    throw e;
-                }
+                fontsResult = await runPhase('check_missing_fonts', () => this.uxpTool('check_missing_fonts', { trace }));
             }
 
             // Phase: post_process
@@ -1244,49 +1232,58 @@ export class TemplateHandlers {
 
     static get_document_stress_summary(args = {}) {
         return response((async () => {
-            const execMeta = { toolName: 'get_document_stress_summary' };
-            const manifest = loadWorkspace();
-            await TemplateHandlers.ensureTemplateReady({ trace: execMeta });
-            const result = await ScriptExecutor.executeViaUXP(`
+            const trace = args.diagnostics
+                ? { traceId: args.traceId || generateTraceId(), toolName: 'get_document_stress_summary' }
+                : null;
+
+            const result = await runGuarded(`
                 function at(c,i){ return c.item ? c.item(i) : c[i]; }
                 function len(c){ try { return c.length || 0; } catch(e) { return 0; } }
                 function safe(fn, fallback=null){ try { return fn(); } catch(e){ return fallback; } }
                 function arr(c, fn){ const out=[]; for (let i=0;i<len(c);i++){ try { out.push(fn(at(c,i), i)); } catch(e){ out.push({ index:i, warning:String(e) }); } } return out; }
-                const dp = doc.documentPreferences;
+
                 const items = doc.allPageItems || doc.pageItems;
-                const totalItems = len(items);
-                const linkCount = len(doc.links);
                 const linkStatusCounts = {};
-                for (let i=0;i<len(doc.links);i++){ const s = String(safe(()=>at(doc.links,i).status,'')); linkStatusCounts[s] = (linkStatusCounts[s]||0)+1; }
-                const fontCount = len(doc.fonts);
+                for (let i=0;i<len(doc.links);i++){
+                    const s = String(safe(()=>at(doc.links,i).status,''));
+                    linkStatusCounts[s] = (linkStatusCounts[s] || 0) + 1;
+                }
+
                 const fontStatusCounts = {};
-                for (let i=0;i<len(doc.fonts);i++){ const s = String(safe(()=>at(doc.fonts,i).status,'')); fontStatusCounts[s] = (fontStatusCounts[s]||0)+1; }
+                for (let i=0;i<len(doc.fonts);i++){
+                    const s = String(safe(()=>at(doc.fonts,i).status,''));
+                    fontStatusCounts[s] = (fontStatusCounts[s] || 0) + 1;
+                }
+
                 const pages = arr(doc.pages, (p,i) => ({
                     pageIndex: i,
                     name: safe(()=>p.name),
                     itemCount: safe(()=>len(p.allPageItems || p.pageItems), 0)
                 }));
+
+                const layers = arr(doc.layers, (l) => l);
+
                 return {
                     success: true,
                     pageCount: len(doc.pages),
                     spreadCount: len(doc.spreads),
                     layerCount: len(doc.layers),
-                    hiddenLayerCount: arr(doc.layers, (l) => l).filter(l => l.visible === false).length,
-                    lockedLayerCount: arr(doc.layers, (l) => l).filter(l => l.locked === true).length,
+                    hiddenLayerCount: layers.filter(l => safe(()=>l.visible) === false).length,
+                    lockedLayerCount: layers.filter(l => safe(()=>l.locked) === true).length,
                     swatchCount: len(doc.swatches),
                     paragraphStyleCount: len(doc.paragraphStyles),
                     characterStyleCount: len(doc.characterStyles),
                     objectStyleCount: len(doc.objectStyles),
-                    documentPageItemCount: totalItems,
-                    linkCount,
+                    documentPageItemCount: len(items),
+                    linkCount: len(doc.links),
                     linkStatusCounts,
-                    fontCount,
+                    fontCount: len(doc.fonts),
                     fontStatusCounts,
                     parentPageCount: len(doc.masterSpreads || []),
                     pages
                 };
-            `, execMeta);
-            if (result?.success === false) throw new Error(result.error || 'Document stress summary failed');
+            `, { trace, phase: 'get_document_stress_summary' });
+
             return result;
         })(), 'get_document_stress_summary');
     }
@@ -1422,21 +1419,56 @@ export class TemplateHandlers {
 
     static verify_template_roundtrip(args = {}) {
         return response((async () => {
-            await this.ensureTemplateReady({ allowSwitchDocument: true, openIfMissing: true });
-            const resolved = args.derivativeId ? unwrapToolResult(await this.resolve_derivative_page({ derivativeId: args.derivativeId })) : unwrapToolResult(await this.resolve_derivative_page({ pageIndex: args.pageIndex }));
-            const save = unwrapToolResult(await this.save_working_copy({}));
-            const itemsResult = await this.inspectPageItemsRaw({ pageIndex: resolved.pageIndex, includeHidden: true, includeTextExcerpt: true });
+            const traceId = args.diagnostics ? (args.traceId || generateTraceId()) : null;
+            const trace = traceId ? { traceId, toolName: 'verify_template_roundtrip' } : null;
+            const phases = [];
+
+            async function runPhase(phase, fn) {
+                const start = Date.now();
+                try {
+                    const result = await fn();
+                    if (traceId) phases.push({ phase, durationMs: Date.now() - start, ok: true });
+                    return result;
+                } catch (error) {
+                    if (traceId) phases.push({ phase, durationMs: Date.now() - start, ok: false, error: error.message });
+                    throw error;
+                }
+            }
+
+            await runPhase('ensureTemplateReady', () =>
+                this.ensureTemplateReady({ allowSwitchDocument: true, openIfMissing: true, trace })
+            );
+            const resolved = unwrapToolResult(await runPhase('resolve_derivative_page', () =>
+                args.derivativeId
+                    ? this.resolve_derivative_page({ derivativeId: args.derivativeId, trace })
+                    : this.resolve_derivative_page({ pageIndex: args.pageIndex, trace })
+            ));
+            const save = unwrapToolResult(await runPhase('save_working_copy', () => this.save_working_copy({ trace })));
+            const itemsResult = unwrapToolResult(await runPhase('inspect_page_items_v2', () =>
+                this.inspectPageItemsRaw({ pageIndex: resolved.pageIndex, includeHidden: true, includeTextExcerpt: true, trace })
+            ));
             const visibleItems = (itemsResult.items || []).filter((item) => !(item.label?.role === 'page_marker' || item.label?.metadata === true));
-            const checks = unwrapToolResult(await this.run_derivative_checks({ derivativeId: args.derivativeId || undefined, pageIndex: resolved.pageIndex, requireNoOverset: args.requireNoOverset !== false, requireNoMissingLinks: args.requireNoMissingLinks === true }));
+            const checks = unwrapToolResult(await runPhase('run_derivative_checks', () =>
+                this.run_derivative_checks({
+                    derivativeId: args.derivativeId || undefined,
+                    pageIndex: resolved.pageIndex,
+                    requireNoOverset: args.requireNoOverset !== false,
+                    requireNoMissingLinks: args.requireNoMissingLinks === true,
+                    diagnostics: args.diagnostics === true,
+                    traceId
+                })
+            ));
             const issues = [];
             if (visibleItems.length < (args.expectedMinItems ?? 1)) issues.push({ check: 'expectedMinItems', expectedMinItems: args.expectedMinItems ?? 1, actual: visibleItems.length });
             if (checks.ok === false) issues.push(...(checks.issues || []));
             let preview = null;
             if (args.requirePreview !== false) {
-                preview = unwrapToolResult(await this.export_derivative_preview({ derivativeId: args.derivativeId, pageIndex: resolved.pageIndex, overwrite: args.overwritePreview !== false }));
+                preview = unwrapToolResult(await runPhase('export_derivative_preview', () =>
+                    this.export_derivative_preview({ derivativeId: args.derivativeId, pageIndex: resolved.pageIndex, overwrite: args.overwritePreview !== false, trace })
+                ));
                 if (!preview?.sizeBytes || !preview?.widthPx || !preview?.heightPx) issues.push({ check: 'preview', issue: 'Preview evidence missing or zero-sized' });
             }
-            return {
+            const result = {
                 success: true,
                 ok: issues.length === 0,
                 derivativeId: args.derivativeId || null,
@@ -1449,19 +1481,58 @@ export class TemplateHandlers {
                 issues,
                 warnings: resolved.warnings || []
             };
+            if (args.diagnostics && traceId) {
+                result.diagnostics = { traceId, phases };
+            }
+            return result;
         })(), 'verify_template_roundtrip');
     }
 
     static finalize_derivative(args = {}) {
         return response((async () => {
             if (!args.derivativeId) throw new Error('derivativeId is required');
-            await this.ensureTemplateReady({ allowSwitchDocument: true, openIfMissing: true });
-            const inspection = unwrapToolResult(await this.inspect_derivative({ derivativeId: args.derivativeId, includeChecks: true, includePreviewHistory: true }));
-            const save = unwrapToolResult(await this.save_working_copy({}));
-            const version = args.saveVersion === false ? null : unwrapToolResult(await this.save_version({ derivativeId: args.derivativeId, label: args.versionLabel || null }));
-            const preview = args.requirePreview === false ? null : unwrapToolResult(await this.export_derivative_preview({ derivativeId: args.derivativeId, overwrite: true }));
-            const roundtrip = unwrapToolResult(await this.verify_template_roundtrip({ derivativeId: args.derivativeId, expectedMinItems: args.expectedMinItems ?? 1, requirePreview: args.requirePreview !== false, requireNoOverset: args.requireNoOverset !== false, requireNoMissingLinks: args.requireNoMissingLinks === true, overwritePreview: true }));
-            return {
+            const traceId = args.diagnostics ? (args.traceId || generateTraceId()) : null;
+            const trace = traceId ? { traceId, toolName: 'finalize_derivative' } : null;
+            const phases = [];
+
+            async function runPhase(phase, fn) {
+                const start = Date.now();
+                try {
+                    const result = await fn();
+                    if (traceId) phases.push({ phase, durationMs: Date.now() - start, ok: true });
+                    return result;
+                } catch (error) {
+                    if (traceId) phases.push({ phase, durationMs: Date.now() - start, ok: false, error: error.message });
+                    throw error;
+                }
+            }
+
+            await runPhase('ensureTemplateReady', () =>
+                this.ensureTemplateReady({ allowSwitchDocument: true, openIfMissing: true, trace })
+            );
+            const inspection = unwrapToolResult(await runPhase('inspect_derivative', () =>
+                this.inspect_derivative({ derivativeId: args.derivativeId, includeChecks: true, includePreviewHistory: true, trace })
+            ));
+            const save = unwrapToolResult(await runPhase('save_working_copy', () => this.save_working_copy({ trace })));
+            const version = args.saveVersion === false ? null : unwrapToolResult(await runPhase('save_version', () =>
+                this.save_version({ derivativeId: args.derivativeId, label: args.versionLabel || null, trace })
+            ));
+            const preview = args.requirePreview === false ? null : unwrapToolResult(await runPhase('export_derivative_preview', () =>
+                this.export_derivative_preview({ derivativeId: args.derivativeId, overwrite: true, trace })
+            ));
+            const roundtrip = unwrapToolResult(await runPhase('verify_template_roundtrip', () =>
+                this.verify_template_roundtrip({
+                    derivativeId: args.derivativeId,
+                    expectedMinItems: args.expectedMinItems ?? 1,
+                    requirePreview: args.requirePreview !== false,
+                    requireNoOverset: args.requireNoOverset !== false,
+                    requireNoMissingLinks: args.requireNoMissingLinks === true,
+                    overwritePreview: true,
+                    diagnostics: args.diagnostics === true,
+                    traceId
+                })
+            ));
+            const result = {
                 success: true,
                 ok: !!roundtrip?.ok,
                 derivativeId: args.derivativeId,
@@ -1472,6 +1543,10 @@ export class TemplateHandlers {
                 roundtrip,
                 issues: roundtrip.issues || []
             };
+            if (args.diagnostics && traceId) {
+                result.diagnostics = { traceId, phases };
+            }
+            return result;
         })(), 'finalize_derivative');
     }
 
@@ -1584,10 +1659,16 @@ function inspectionAndChecks(name) {
         function shapeInfoForItem(it){ const type = safe(()=>it.constructor.name, null); const path0 = safe(()=>it.paths && len(it.paths) ? at(it.paths,0) : null, null); const points = path0 ? arr(path0.pathPoints, (pt)=>({ anchor:safe(()=>pt.anchor, null), leftDirection:safe(()=>pt.leftDirection, null), rightDirection:safe(()=>pt.rightDirection, null), pointType:safe(()=>enumString(pt.pointType), null) })) : []; return { shapeType:/Oval/i.test(type) ? 'oval' : /Polygon/i.test(type) ? 'polygon' : /GraphicLine/i.test(type) ? 'line' : /Rectangle|TextFrame/i.test(type) ? 'rectangle' : type, cornerRadius:safe(()=>it.topLeftCornerRadius, null), pathPoints:points.length <= 64 ? points : [], pathPointCount:points.length }; }
         function pageIndexForItem(it){ const pp = safe(()=>it.parentPage, null); return pp ? collectionIndexById(doc.pages, pp) : null; }
         function spreadIndexForItem(it){ const pp = safe(()=>it.parentPage, null); const sp = pp ? safe(()=>pp.parent, null) : safe(()=>it.parent, null); return sp ? collectionIndexById(doc.spreads, sp) : null; }
-        // ponytail: summary mode avoids rich fields (visibleBounds, full text, path arrays, swatch objects, PPI)
         function itemInfoSummary(it,i){ const layer = safe(()=>it.itemLayer, null); const isText = /TextFrame/i.test(safe(()=>it.constructor.name,'')); return { objectId:safe(()=>it.id), name:safe(()=>it.name), type:safe(()=>it.constructor.name), index:i, pageIndex:pageIndexForItem(it), spreadIndex:spreadIndexForItem(it), layerName:safe(()=>layer.name, null), layerVisible:safe(()=>layer.visible, null), locked:safe(()=>it.locked, false), visible:safe(()=>it.visible, true), bounds:safe(()=>it.geometricBounds, null), label:readLabel(it), text:isText ? { overset:!!safe(()=>it.overflows,false), excerpt:args.includeTextExcerpt === true ? String(safe(()=>it.contents,'') || '').slice(0,200) : undefined } : null, image:safe(()=>it.graphics && len(it.graphics) > 0, false) ? { hasPlacedGraphic:true } : null, shape:{ pathPointCount:safe(()=>{ const p0 = safe(()=>it.paths && len(it.paths) ? at(it.paths,0) : null, null); return p0 ? len(p0.pathPoints) : 0; }, 0) } }; }
         function itemInfo(it,i){ const layer = safe(()=>it.itemLayer, null); return { objectId:safe(()=>it.id), name:safe(()=>it.name), type:safe(()=>it.constructor.name), index:i, zOrderIndex:safe(()=>it.index, null), pageIndex:pageIndexForItem(it), spreadIndex:spreadIndexForItem(it), layerName:safe(()=>layer.name, null), layerId:safe(()=>layer.id, null), layerVisible:safe(()=>layer.visible, null), bounds:safe(()=>it.geometricBounds, null), geometricBounds:safe(()=>it.geometricBounds, null), visibleBounds:safe(()=>it.visibleBounds, null), coordinateUnit:'pt', rotation:safe(()=>it.rotationAngle, null), locked:safe(()=>it.locked, false), visible:safe(()=>it.visible, true), fillColor:swatchRef(safe(()=>it.fillColor, null)), strokeColor:swatchRef(safe(()=>it.strokeColor, null)), strokeWeight:safe(()=>it.strokeWeight, null), opacity:safe(()=>it.transparencySettings.blendingSettings.opacity, null), appliedObjectStyle:safe(()=>it.appliedObjectStyle.name, null), parentOrigin:safe(()=>it.overriddenMasterPageItem ? { objectId:it.overriddenMasterPageItem.id, name:it.overriddenMasterPageItem.name } : null, null), overridden:safe(()=>it.overridden, null), label:readLabel(it), text:textInfo(it), image:imageInfoForItem(it), shape:shapeInfoForItem(it) } };
+        function itemInfoForDetailLevel(it,i){ const info = itemInfo(it,i); if (args.detailLevel !== 'deep' && info.shape) delete info.shape.pathPoints; return info; }
         function itemSource(){ if (args.pageIndex != null) { const p = at(doc.pages, args.pageIndex); let out = arr(p.allPageItems || p.pageItems, x=>x); if (args.includeParentItems) out = out.concat(arr(safe(()=>p.masterPageItems, []), x=>x)); return out; } if (args.spreadIndex != null) { const s = at(doc.spreads, args.spreadIndex); return arr(s.allPageItems || s.pageItems, x=>x); } return arr(doc.allPageItems || doc.pageItems, x=>x); }
+        // Early return for inspect_page_items_v2 — avoids building expensive document-wide metadata
+        if (${q(name)} === 'inspect_page_items_v2') {
+            const inspectedItems = arr(itemSource(), args.detailLevel === 'summary' ? itemInfoSummary : itemInfoForDetailLevel);
+            const visibleItems = inspectedItems.filter(i => args.includeHidden || (i.visible !== false && i.layerVisible !== false));
+            return { success:true, items:visibleItems, warnings:[] };
+        }
         const dp = doc.documentPreferences;
         const documentUnits = { horizontalMeasurementUnits:safe(()=>enumString(doc.viewPreferences.horizontalMeasurementUnits), null), verticalMeasurementUnits:safe(()=>enumString(doc.viewPreferences.verticalMeasurementUnits), null), rulerOrigin:safe(()=>enumString(doc.viewPreferences.rulerOrigin), null) };
         const document = { name:doc.name, path:expected, pageCount:len(doc.pages), facingPages:safe(()=>dp.facingPages, null), pageWidth:safe(()=>dp.pageWidth, null), pageHeight:safe(()=>dp.pageHeight, null), pageSize:safe(()=>dp.pageSize, null), pageOrientation:safe(()=>enumString(dp.pageOrientation), null), bleed:{ top:safe(()=>dp.documentBleedTopOffset, null), bottom:safe(()=>dp.documentBleedBottomOffset, null), insideOrLeft:safe(()=>dp.documentBleedInsideOrLeftOffset, null), outsideOrRight:safe(()=>dp.documentBleedOutsideOrRightOffset, null), uniform:safe(()=>dp.documentBleedUniformSize, null) }, slug:{ top:safe(()=>dp.slugTopOffset, null), bottom:safe(()=>dp.slugBottomOffset, null), insideOrLeft:safe(()=>dp.slugInsideOrLeftOffset, null), outsideOrRight:safe(()=>dp.slugRightOrOutsideOffset, null), uniform:safe(()=>dp.documentSlugUniformSize, null) }, documentUnits };
@@ -1597,12 +1678,11 @@ function inspectionAndChecks(name) {
         const pages = arr(doc.pages, pageInfo);
         const spreads = arr(doc.spreads, spreadInfo);
         const parentPages = arr(doc.masterSpreads || [], parentPageInfo);
-        const inspectedItems = arr(itemSource(), args.detailLevel === 'summary' ? itemInfoSummary : args.detailLevel === 'deep' ? itemInfo : itemInfo);
+        const inspectedItems = arr(itemSource(), args.detailLevel === 'summary' ? itemInfoSummary : itemInfoForDetailLevel);
         const visibleInspectItems = inspectedItems.filter(i => args.includeHidden || (i.visible !== false && i.layerVisible !== false));
     `;
     return `${common}
         if (${q(name)} === 'inspect_document_bundle') return { success:true, document, pageCount:len(doc.pages), pageSizes:pages.map(p=>({pageIndex:p.index, ...(p.pageSize||{})})), facingPages:document.facingPages, margins:pages.map(p=>({pageIndex:p.index, margins:p.marginPreferences})), bleed:document.bleed, slug:document.slug, spreads, pages, layers, swatches, styles, parentPages, fonts:arr(doc.fonts,(f)=>({name:safe(()=>f.name),fontFamily:safe(()=>f.fontFamily,null),fontStyle:safe(()=>f.fontStyleName,null),status:safe(()=>String(f.status))})), links:arr(doc.links,(l)=>({name:safe(()=>l.name),status:safe(()=>String(l.status)),path:safe(()=>l.filePath)})), documentUnits, basicPreflightState:safe(()=>({ preflightOff:doc.preflightOptions.preflightOff }), null), warnings:[] };
-        if (${q(name)} === 'inspect_page_items_v2') return { success:true, items:visibleInspectItems, warnings:[] };
         if (${q(name)} === 'inspect_styles') return { success:true, styles, warnings:[] };
         if (${q(name)} === 'inspect_swatches') return { success:true, swatches, warnings:[] };
         if (${q(name)} === 'inspect_layers') return { success:true, layers, warnings:[] };
