@@ -62,7 +62,11 @@ export class ScriptExecutor {
             });
         } catch (err) {
             const durationMs = Date.now() - start;
-            if (err.name === 'TimeoutError') {
+            const isTimeout =
+                err.name === 'TimeoutError' ||
+                err.name === 'AbortError';
+
+            if (isTimeout) {
                 logEvent({
                     event: 'fetch_timeout',
                     traceId, toolName, phase, parentTraceId,

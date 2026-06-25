@@ -36,7 +36,7 @@ function logEvent(fields) {
 }
 
 let pluginSocket = null;
-const pending = new Map(); // id -> { resolve, reject, timer, traceId, toolName, phase, enqueuedAt }
+const pending = new Map(); // id -> { resolve, reject, timer, traceId, toolName, phase, dequeuedAt, queueWaitMs, queueDepthAtEnqueue }
 
 // Serial execution queue — one UXP execution in flight at a time to prevent
 // concurrent DOM mutations from corrupting InDesign document state (H2).
@@ -114,6 +114,9 @@ function drainQueue() {
     traceId,
     toolName,
     phase,
+    dequeuedAt: now,
+    queueWaitMs,
+    queueDepthAtEnqueue,
   });
 
   // Guard against WebSocket transitioning to CLOSING between null-check and send (L2)
@@ -198,7 +201,7 @@ wss.on('connection', (ws) => {
     clearTimeout(item.timer);
     pending.delete(msg.id);
 
-    const bridgeExecutionMs = Date.now() - (activeRequest?.dequeuedAt || activeRequest?.enqueuedAt || Date.now());
+    const bridgeExecutionMs = Date.now() - (item.dequeuedAt || activeRequest?.dequeuedAt || activeRequest?.enqueuedAt || Date.now());
 
     logEvent({
       event: 'ws_response',
@@ -208,6 +211,8 @@ wss.on('connection', (ws) => {
       requestId: msg.id,
       responseBytes,
       bridgeExecutionMs,
+      queueWaitMs: item.queueWaitMs,
+      queueDepthAtEnqueue: item.queueDepthAtEnqueue,
       type: msg.type,
       ok: msg.type === 'result'
     });

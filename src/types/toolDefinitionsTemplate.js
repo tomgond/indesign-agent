@@ -341,6 +341,8 @@ const derivativeToolDefinitions = [
                 requireNoOverset: { type: 'boolean', default: true },
                 requireNoMissingLinks: { type: 'boolean', default: false },
                 overwritePreview: { type: 'boolean', default: true },
+                detailLevel: { type: 'string', enum: ['summary', 'standard', 'deep'], default: 'summary' },
+                includeTextExcerpt: { type: 'boolean', default: false },
                 diagnostics: { type: 'boolean', default: false },
                 traceId: { type: 'string' }
             }),
