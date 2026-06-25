@@ -4,6 +4,13 @@
 
 A Model Context Protocol (MCP) server that gives AI assistants direct, native control over Adobe InDesign via a UXP plugin bridge. ~130 tools covering the full InDesign feature set — documents, pages, text, graphics, styles, master spreads, books, and export.
 
+Agent and repo-specific guidance:
+
+- `AGENTS.md`
+- `docs/MCP_INSTRUCTIONS.md`
+- `.opencode/skills/indesign-mcp-repo/SKILL.md`
+- `.opencode/skills/indesign-template-agent/SKILL.md`
+
 ---
 
 ## Why UXP vs AppleScript
@@ -171,6 +178,9 @@ Live pass/fail details are tracked in [docs/live-mcp-validation.md](docs/live-mc
 ### Export & Output
 `export_pdf` `export_images` `export_epub` `package_document`
 
+### Screenshot / Visual Debug
+`capture_screen_preview` `capture_indesign_screen_preview`
+
 ### Books
 `create_book` `open_book` `list_books` `add_document_to_book` `synchronize_book` `repaginate_book` `export_book` `package_book` `preflight_book` `print_book` `get_book_info` `set_book_properties` `update_all_cross_references` `update_all_numbers` `update_chapter_and_paragraph_numbers`
 
@@ -198,6 +208,7 @@ src/
 │   ├── groupHandlers.js
 │   ├── bookHandlers.js
 │   ├── exportHandlers.js
+│   ├── screenshotHandlers.js
 │   └── utilityHandlers.js
 ├── types/                      # MCP tool schema definitions
 └── utils/stringUtils.js

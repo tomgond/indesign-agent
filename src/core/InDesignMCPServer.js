@@ -16,6 +16,7 @@ import {
     MasterSpreadHandlers,
     PageHandlers,
     PageItemHandlers,
+    ScreenshotHandlers,
     StyleHandlers,
     TextHandlers,
     UtilityHandlers,
@@ -203,6 +204,10 @@ export class InDesignMCPServer {
             case 'export_images': return await ExportHandlers.exportImages(args);
             case 'package_document': return await ExportHandlers.packageDocument(args);
 
+            // Screenshot/Capture Tools (OS-level, not InDesign export)
+            case 'capture_screen_preview': return await ScreenshotHandlers.captureScreenPreview(args);
+            case 'capture_indesign_screen_preview': return await ScreenshotHandlers.captureInDesignScreenPreview(args);
+
             // Master Spread Management
             case 'create_master_spread': return await MasterSpreadHandlers.createMasterSpread(args);
             case 'list_master_spreads': return await MasterSpreadHandlers.listMasterSpreads(args);
@@ -305,6 +310,9 @@ export class InDesignMCPServer {
             if (name === 'export_pdf') assertWorkspacePath(args.filePath, { kind: 'exports', manifest });
             if (name === 'export_images' || name === 'package_document') {
                 assertWorkspacePath(args.outputPath || args.folderPath, { kind: 'exports', manifest });
+            }
+            if (name === 'capture_screen_preview' || name === 'capture_indesign_screen_preview') {
+                assertWorkspacePath(args.outputPath, { kind: 'exports', manifest });
             }
         } catch (error) {
             return formatErrorResponse(error.message, name);

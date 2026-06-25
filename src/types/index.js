@@ -15,6 +15,8 @@ import { spreadToolDefinitions } from './toolDefinitionsSpread.js';
 import { layerToolDefinitions } from './toolDefinitionsLayer.js';
 import { templateToolDefinitions, templateToolProfileNames } from './toolDefinitionsTemplate.js';
 
+import { screenshotToolDefinitions } from './toolDefinitionsScreenshot.js';
+
 export const genericOnlyDefinitions = [
     ...pageToolDefinitions,
     ...contentToolDefinitions,
@@ -26,12 +28,13 @@ export const genericOnlyDefinitions = [
     ...masterSpreadToolDefinitions,
     ...spreadToolDefinitions,
     ...layerToolDefinitions,
+    ...screenshotToolDefinitions,
 ];
 
 export const allToolDefinitions = [...new Map([...genericOnlyDefinitions, ...templateToolDefinitions].map((tool) => [tool.name, tool])).values()];
 
 export function getToolDefinitionsForProfile(profile = process.env.INDESIGN_TOOL_PROFILE || 'template') {
-    if (profile === 'template') return templateToolDefinitions;
+    if (profile === 'template') return [...templateToolDefinitions, ...screenshotToolDefinitions];
     if (profile === 'generic') return genericOnlyDefinitions;
     if (profile === 'all') return allToolDefinitions;
     throw new Error(`Unknown INDESIGN_TOOL_PROFILE: ${profile}`);
@@ -48,4 +51,5 @@ export { pageItemGroupToolDefinitions } from './toolDefinitionsPageItemGroup.js'
 export { masterSpreadToolDefinitions } from './toolDefinitionsMasterSpread.js';
 export { spreadToolDefinitions } from './toolDefinitionsSpread.js';
 export { layerToolDefinitions } from './toolDefinitionsLayer.js'; 
+export { screenshotToolDefinitions } from './toolDefinitionsScreenshot.js';
 export { templateToolDefinitions, templateToolProfileNames } from './toolDefinitionsTemplate.js';

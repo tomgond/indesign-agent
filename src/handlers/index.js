@@ -23,6 +23,9 @@ export { GroupHandlers } from './groupHandlers.js';
 export { BookHandlers } from './bookHandlers.js';
 export { ExportHandlers } from './exportHandlers.js';
 
+// Visual Debug / Screenshot
+export { ScreenshotHandlers } from './screenshotHandlers.js';
+
 // System and Utility
 export { UtilityHandlers } from './utilityHandlers.js';
 export { HelpHandlers } from './helpHandlers.js';
@@ -49,10 +52,11 @@ export { TemplateHandlers } from './templateHandlers.js';
  * - BookHandlers: Multi-document book management
  * - ExportHandlers: PDF, images, packaging
  * 
- * 🛠️ System Utilities (1 handler)
+ * 🛠️ System & Debug Utilities (2 handlers)
  * - UtilityHandlers: Code execution, session management
+ * - ScreenshotHandlers: OS-level screen capture for visual debugging
  * 
- * Total: 13 handler classes covering 135+ tools
+ * Total: 14 handler classes covering 135+ tools
  */
 
 /**
