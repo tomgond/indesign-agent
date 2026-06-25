@@ -3,6 +3,15 @@ const { entrypoints } = require("uxp");
 
 const statusEl = document.getElementById("status");
 
+// ponytail: Named constant, not env-var (UXP has no process.env). Change here if needed.
+const PLUGIN_TIMEOUT_MS = 25000;
+
+function logEvent(fields) {
+  const entry = { ts: new Date().toISOString(), component: "Plugin", ...fields };
+  // UXP may log via console or we write as console.debug
+  console.log(JSON.stringify(entry));
+}
+
 function serializeResult(value) {
   if (value === null || value === undefined) return null;
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
@@ -28,7 +37,20 @@ function sandboxedRequire(moduleName) {
 }
 
 async function handleExecute(ws, msg) {
+  const { id, code, traceId, toolName, phase } = msg;
+  const codeBytes = Buffer.byteLength(code || '', 'utf8');
   let timerId;
+
+  logEvent({
+    event: "execute_received",
+    traceId, toolName, phase, requestId: id,
+    codeBytes,
+    firstChars: code ? code.slice(0, 80) : "",
+  });
+
+  const execStart = Date.now();
+  let timedOut = false;
+
   try {
     // Pass sandboxedRequire so code inside new Function() can call require('indesign') etc.
     // new Function() runs in global scope and loses UXP's module-scoped require.
@@ -36,13 +58,52 @@ async function handleExecute(ws, msg) {
     const result = await Promise.race([
       fn(app, sandboxedRequire).finally(() => clearTimeout(timerId)),
       new Promise((_, reject) => {
-        timerId = setTimeout(() => reject(new Error('Execution timed out in plugin (25s)')), 25000);
+        timerId = setTimeout(() => {
+          timedOut = true;
+          reject(new Error(`Execution timed out in plugin (${PLUGIN_TIMEOUT_MS}ms)`));
+        }, PLUGIN_TIMEOUT_MS);
       }),
     ]);
-    ws.send(JSON.stringify({ type: 'result', id: msg.id, result: serializeResult(result) }));
+    const pluginExecutionMs = Date.now() - execStart;
+
+    // Measure serialization time
+    const serStart = Date.now();
+    const serialized = serializeResult(result);
+    const serializeMs = Date.now() - serStart;
+
+    const payload = JSON.stringify({ type: 'result', id, result: serialized });
+    const resultBytes = Buffer.byteLength(payload, 'utf8');
+
+    const sendStart = Date.now();
+    ws.send(payload);
+    const sendMs = Date.now() - sendStart;
+
+    logEvent({
+      event: "execute_complete",
+      traceId, toolName, phase, requestId: id,
+      pluginExecutionMs,
+      serializeMs,
+      resultBytes,
+      sendMs,
+      timedOut: false,
+      ok: true,
+    });
   } catch (e) {
     clearTimeout(timerId);
-    ws.send(JSON.stringify({ type: 'error', id: msg.id, error: e.message || String(e) }));
+    const pluginExecutionMs = Date.now() - execStart;
+    const errorMsg = e.message || String(e);
+
+    logEvent({
+      event: "execute_error",
+      traceId, toolName, phase, requestId: id,
+      pluginExecutionMs,
+      timedOut,
+      ok: false,
+      error: errorMsg,
+    });
+
+    const payload = JSON.stringify({ type: 'error', id, error: errorMsg });
+    ws.send(payload);
   }
 }
 
@@ -51,7 +112,7 @@ function connectToBridge() {
 
   ws.onopen = () => {
     statusEl.textContent = "Connected to bridge ✓";
-    console.log("[Plugin] Connected to bridge");
+    logEvent({ event: "connected", ok: true });
   };
 
   ws.onmessage = (event) => {
@@ -59,11 +120,9 @@ function connectToBridge() {
     try {
       msg = JSON.parse(event.data);
     } catch (e) {
-      console.error("[Plugin] Invalid JSON:", event.data);
+      logEvent({ event: "invalid_json", error: "Failed to parse incoming message", raw: event.data.slice(0, 200) });
       return;
     }
-
-    console.log("[Plugin] Received:", event.data.slice(0, 200));
 
     if (msg.type === 'ping') {
       ws.send(JSON.stringify({ type: 'pong', id: msg.id }));
@@ -74,11 +133,12 @@ function connectToBridge() {
 
   ws.onerror = (err) => {
     statusEl.textContent = "Bridge connection error";
-    console.error("[Plugin] WebSocket error:", err);
+    logEvent({ event: "ws_error", error: err.message || String(err) });
   };
 
   ws.onclose = () => {
     statusEl.textContent = "Disconnected — retrying in 3s";
+    logEvent({ event: "disconnected", willRetryInMs: 3000 });
     setTimeout(connectToBridge, 3000);
   };
 }
@@ -89,16 +149,16 @@ entrypoints.setup({
       show() {
         try {
           const docCount = app.documents.length;
-          console.log("[Plugin] DOM OK — open docs:", docCount);
+          logEvent({ event: "dom_check", docCount, ok: true });
         } catch (e) {
-          console.error("[Plugin] DOM access failed:", e);
+          logEvent({ event: "dom_check", ok: false, error: String(e) });
         }
 
         try {
           const result = new Function('return 1 + 1')();
-          console.log("[Plugin] new Function() OK:", result);
+          logEvent({ event: "newFunction_check", ok: true });
         } catch (e) {
-          console.error("[Plugin] new Function() failed:", e);
+          logEvent({ event: "newFunction_check", ok: false, error: String(e) });
         }
 
         connectToBridge();

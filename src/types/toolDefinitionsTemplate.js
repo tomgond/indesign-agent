@@ -302,7 +302,7 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'run_derivative_checks',
-        description: 'Run derivative-scoped checks for overset, missing links/fonts, visible reference underlay, and unlabeled objects.',
+        description: 'Run derivative-scoped checks for overset, missing links/fonts, visible reference underlay, and unlabeled objects. Document-global link/font checks are opt-in by default.',
         inputSchema: {
             ...schema({
                 derivativeId: { type: 'string' },
@@ -311,10 +311,19 @@ const derivativeToolDefinitions = [
                 requireNoVisibleReferenceUnderlay: { type: 'boolean' },
                 requireNoOverset: { type: 'boolean' },
                 requireNoMissingLinks: { type: 'boolean' },
-                requireNoMissingFonts: { type: 'boolean' }
+                requireNoMissingFonts: { type: 'boolean' },
+                includeDocumentLinkCheck: { type: 'boolean', description: 'Explicitly run document-global link check even if requireNoMissingLinks is not set' },
+                includeDocumentFontCheck: { type: 'boolean', description: 'Explicitly run document-global font check even if requireNoMissingFonts is not set' },
+                diagnostics: { type: 'boolean', default: false, description: 'Return traceId, phase timings, and item counts' },
+                includeOversetExcerpt: { type: 'boolean', default: false, description: 'Include short text excerpt in overset evidence' }
             }),
             anyOf: [{ required: ['derivativeId'] }, { required: ['pageIndex'] }]
         }
+    },
+    {
+        name: 'get_document_stress_summary',
+        description: 'Return document stress counts only (pages, items, links, fonts, layers). Much faster than inspect_document_bundle. Use to predict timeout risk before running deep tools.',
+        inputSchema: schema({})
     },
     {
         name: 'verify_template_roundtrip',
@@ -492,7 +501,7 @@ const primitiveToolDefinitions = [
     { name: 'validate_workspace_path', description: 'Validate a path stays inside the workspace jail.', inputSchema: schema({ path: { type: 'string' }, kind: { type: 'string', enum: ['input', 'work', 'previews', 'exports', 'versions', 'logs', 'assets'] } }, ['path']) },
     { name: 'validate_active_document_is_working_copy', description: 'Verify active InDesign document matches work/current.indd.', inputSchema: schema({}) },
     { name: 'inspect_document_bundle', description: 'Inspect document, pages, spreads, layers, styles, and swatches.', inputSchema: schema({ includeHidden: { type: 'boolean', default: false }, includeTextExcerpt: { type: 'boolean', default: true } }) },
-    { name: 'inspect_page_items_v2', description: 'Inspect page items with labels, styles, text, and image metadata.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, spreadIndex: { type: 'integer', minimum: 0 }, includeHidden: { type: 'boolean', default: false }, includeParentItems: { type: 'boolean', default: false }, includeTextExcerpt: { type: 'boolean', default: true } }) },
+    { name: 'inspect_page_items_v2', description: 'Inspect page items with labels, styles, text, and image metadata. Use detailLevel=summary for cheap checks.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, spreadIndex: { type: 'integer', minimum: 0 }, includeHidden: { type: 'boolean', default: false }, includeParentItems: { type: 'boolean', default: false }, includeTextExcerpt: { type: 'boolean', default: true }, detailLevel: { type: 'string', enum: ['summary', 'standard', 'deep'], default: 'standard', description: 'summary=minimal fields, standard=current behavior (no full path arrays), deep=full metadata with path points' } }) },
     { name: 'inspect_styles', description: 'Inspect document paragraph, character, object, table, and cell styles.', inputSchema: schema({}) },
     { name: 'inspect_swatches', description: 'Inspect document swatches.', inputSchema: schema({}) },
     { name: 'inspect_layers', description: 'Inspect document layers.', inputSchema: schema({}) },

@@ -4,7 +4,9 @@ const { v4: uuidv4 } = require('uuid');
 
 const WS_PORT = 3001;
 const HTTP_PORT = 3000;
-const TIMEOUT_MS = 30000;
+
+// Timeout config — env-overridable
+const TIMEOUT_MS = Number(process.env.INDESIGN_BRIDGE_EXEC_TIMEOUT_MS || 30000);
 
 // L1: Optional auth token — set BRIDGE_TOKEN env var to require Bearer auth on /execute.
 // Without it the bridge is open to any local process; token is recommended for shared machines.
@@ -15,7 +17,7 @@ if (!BRIDGE_TOKEN) {
 }
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Auth middleware — only applied when BRIDGE_TOKEN is configured
 if (BRIDGE_TOKEN) {
@@ -28,13 +30,19 @@ if (BRIDGE_TOKEN) {
   });
 }
 
+function logEvent(fields) {
+  const entry = { ts: new Date().toISOString(), component: 'Bridge', ...fields };
+  console.error(JSON.stringify(entry));
+}
+
 let pluginSocket = null;
-const pending = new Map(); // id -> { resolve, reject, timer }
+const pending = new Map(); // id -> { resolve, reject, timer, traceId, toolName, phase, enqueuedAt }
 
 // Serial execution queue — one UXP execution in flight at a time to prevent
 // concurrent DOM mutations from corrupting InDesign document state (H2).
 const requestQueue = [];
 let processingQueue = false;
+let activeRequest = null; // { id, traceId, toolName, phase, enqueuedAt, dequeuedAt, durationMs }
 
 function drainQueue() {
   if (processingQueue || requestQueue.length === 0) return;
@@ -44,52 +52,110 @@ function drainQueue() {
     // Drain all queued items with a connection error
     while (requestQueue.length > 0) {
       const item = requestQueue.shift();
+      const queueWaitMs = Date.now() - item.enqueuedAt;
+      logEvent({
+        event: 'queue_drain_no_plugin', traceId: item.traceId,
+        toolName: item.toolName, phase: item.phase,
+        queueDepthAtEnqueue: item.queueDepthAtEnqueue,
+        queueWaitMs, ok: false,
+        error: 'Plugin not connected on drain'
+      });
       item.reject(new Error('Plugin not connected'));
     }
     return;
   }
 
   processingQueue = true;
-  const { code, resolve, reject } = requestQueue.shift();
+  const { code, resolve, reject, traceId, toolName, phase, parentTraceId, enqueuedAt, queueDepthAtEnqueue } = requestQueue.shift();
   const id = uuidv4();
+  const queueWaitMs = Date.now() - enqueuedAt;
+  const now = Date.now();
+
+  activeRequest = { id, traceId, toolName, phase, enqueuedAt, dequeuedAt: now };
+
+  logEvent({
+    event: 'queue_dequeue',
+    traceId, toolName, phase, parentTraceId,
+    requestId: id,
+    queueWaitMs,
+    queueDepthAtEnqueue,
+    timeoutMs: TIMEOUT_MS
+  });
 
   const timer = setTimeout(() => {
+    const age = Date.now() - now;
     pending.delete(id);
+    activeRequest = null;
     processingQueue = false;
-    reject(new Error('Execution timed out after 30s'));
+    logEvent({
+      event: 'execution_timeout',
+      traceId, toolName, phase, requestId: id,
+      queueWaitMs, ageMs: age, timeoutMs: TIMEOUT_MS,
+      ok: false, error: `Execution timed out after ${TIMEOUT_MS}ms`
+    });
+    reject(new Error(`Execution timed out after ${TIMEOUT_MS}ms`));
     drainQueue();
   }, TIMEOUT_MS);
 
   pending.set(id, {
     resolve: (result) => {
+      const bridgeExecutionMs = Date.now() - now;
+      activeRequest = null;
       processingQueue = false;
       resolve(result);
       drainQueue();
     },
     reject: (err) => {
+      const bridgeExecutionMs = Date.now() - now;
+      activeRequest = null;
       processingQueue = false;
       reject(err);
       drainQueue();
     },
     timer,
+    traceId,
+    toolName,
+    phase,
   });
 
   // Guard against WebSocket transitioning to CLOSING between null-check and send (L2)
   try {
-    socket.send(JSON.stringify({ type: 'execute', id, code }));
-    console.log('[Bridge] Sending execute:', id, code.slice(0, 100));
+    const msg = JSON.stringify({ type: 'execute', id, code, traceId, toolName, phase, parentTraceId });
+    const msgBytes = Buffer.byteLength(msg, 'utf8');
+    socket.send(msg);
+    logEvent({
+      event: 'ws_send',
+      traceId, toolName, phase, requestId: id,
+      msgBytes,
+      queueWaitMs,
+    });
   } catch (err) {
     clearTimeout(timer);
     pending.delete(id);
+    activeRequest = null;
     processingQueue = false;
+    logEvent({
+      event: 'ws_send_failed',
+      traceId, toolName, phase, requestId: id,
+      queueWaitMs, ok: false, error: err.message
+    });
     reject(new Error('Failed to send to plugin: ' + err.message));
     drainQueue();
   }
 }
 
-function enqueueExecution(code) {
+function enqueueExecution(code, meta = {}) {
+  const { traceId, toolName, phase, parentTraceId } = meta;
+  const enqueuedAt = Date.now();
+  const queueDepthAtEnqueue = requestQueue.length;
   return new Promise((resolve, reject) => {
-    requestQueue.push({ code, resolve, reject });
+    requestQueue.push({ code, resolve, reject, traceId, toolName, phase, parentTraceId, enqueuedAt, queueDepthAtEnqueue });
+    logEvent({
+      event: 'queue_enqueue',
+      traceId, toolName, phase, parentTraceId,
+      queueDepthAtEnqueue,
+      pendingMapSize: pending.size
+    });
     drainQueue();
   });
 }
@@ -102,25 +168,65 @@ wss.on('connection', (ws) => {
   pluginSocket = ws;
 
   ws.on('message', (data) => {
-    let msg;
+    let rawStr;
     try {
-      msg = JSON.parse(data.toString());
+      rawStr = data.toString();
     } catch (e) {
-      console.error('[Bridge] Invalid JSON from plugin:', data.toString());
+      console.error('[Bridge] Failed to decode message:', e);
       return;
     }
 
-    console.log('[Bridge] From plugin:', JSON.stringify(msg).slice(0, 200));
+    const responseBytes = Buffer.byteLength(rawStr, 'utf8');
+    let msg;
+    try {
+      msg = JSON.parse(rawStr);
+    } catch (e) {
+      console.error('[Bridge] Invalid JSON from plugin:', rawStr.slice(0, 200));
+      return;
+    }
 
     const item = pending.get(msg.id);
-    if (!item) return;
+    if (!item) {
+      logEvent({
+        event: 'ws_response_orphan',
+        requestId: msg.id,
+        responseBytes,
+        type: msg.type,
+        warning: 'No matching pending request'
+      });
+      return;
+    }
 
     clearTimeout(item.timer);
     pending.delete(msg.id);
 
+    const bridgeExecutionMs = Date.now() - (activeRequest?.dequeuedAt || activeRequest?.enqueuedAt || Date.now());
+
+    logEvent({
+      event: 'ws_response',
+      traceId: item.traceId,
+      toolName: item.toolName,
+      phase: item.phase,
+      requestId: msg.id,
+      responseBytes,
+      bridgeExecutionMs,
+      type: msg.type,
+      ok: msg.type === 'result'
+    });
+
     if (msg.type === 'result') {
       item.resolve(msg.result);
     } else if (msg.type === 'error') {
+      logEvent({
+        event: 'plugin_error',
+        traceId: item.traceId,
+        toolName: item.toolName,
+        phase: item.phase,
+        requestId: msg.id,
+        bridgeExecutionMs,
+        ok: false,
+        error: msg.error
+      });
       item.reject(new Error(msg.error));
     } else if (msg.type === 'pong') {
       item.resolve('pong');
@@ -130,9 +236,19 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     console.log('[Bridge] Plugin disconnected');
     pluginSocket = null;
+    activeRequest = null;
     // Reject any in-flight pending entry
     for (const [id, item] of pending.entries()) {
       clearTimeout(item.timer);
+      logEvent({
+        event: 'plugin_disconnected_flush',
+        traceId: item.traceId,
+        toolName: item.toolName,
+        phase: item.phase,
+        requestId: id,
+        ok: false,
+        error: 'Plugin disconnected'
+      });
       item.reject(new Error('Plugin disconnected'));
       pending.delete(id);
     }
@@ -151,7 +267,23 @@ wss.on('connection', (ws) => {
 // HTTP API — MCP server calls these endpoints
 
 app.get('/status', (req, res) => {
-  res.json({ connected: pluginSocket !== null, queueDepth: requestQueue.length });
+  const now = Date.now();
+  res.json({
+    connected: pluginSocket !== null,
+    queueDepth: requestQueue.length,
+    processingQueue,
+    activeRequest: activeRequest ? {
+      id: activeRequest.id,
+      traceId: activeRequest.traceId,
+      toolName: activeRequest.toolName,
+      phase: activeRequest.phase,
+      ageMs: now - activeRequest.dequeuedAt
+    } : null,
+    pendingCount: pending.size,
+    timeouts: {
+      bridgeExecutionMs: TIMEOUT_MS,
+    }
+  });
 });
 
 app.post('/execute', async (req, res) => {
@@ -161,15 +293,43 @@ app.post('/execute', async (req, res) => {
     });
   }
 
-  const { code } = req.body;
+  const { code, traceId, toolName, phase, parentTraceId } = req.body;
   if (!code) {
     return res.status(400).json({ error: 'Missing "code" in request body' });
   }
 
+  const bodyStr = JSON.stringify(req.body);
+  const requestBytes = Buffer.byteLength(bodyStr, 'utf8');
+
+  logEvent({
+    event: 'execute_request',
+    traceId, toolName, phase, parentTraceId,
+    requestBytes,
+    codeBytes: Buffer.byteLength(code, 'utf8'),
+    queueDepth: requestQueue.length
+  });
+
   try {
-    const result = await enqueueExecution(code);
+    const result = await enqueueExecution(code, { traceId, toolName, phase, parentTraceId });
+    const resultStr = JSON.stringify({ result });
+    const responseBytes = Buffer.byteLength(resultStr, 'utf8');
+    logEvent({
+      event: 'execute_response',
+      traceId, toolName, phase,
+      responseBytes,
+      ok: true
+    });
     res.json({ result });
   } catch (err) {
+    const errorBody = JSON.stringify({ error: err.message });
+    const responseBytes = Buffer.byteLength(errorBody, 'utf8');
+    logEvent({
+      event: 'execute_error',
+      traceId, toolName, phase,
+      responseBytes,
+      ok: false,
+      error: err.message
+    });
     res.status(500).json({ error: err.message });
   }
 });
@@ -177,5 +337,6 @@ app.post('/execute', async (req, res) => {
 app.listen(HTTP_PORT, '127.0.0.1', () => {
   console.log(`[Bridge] HTTP server on http://127.0.0.1:${HTTP_PORT}`);
   console.log(`[Bridge] WebSocket server on ws://127.0.0.1:${WS_PORT}`);
+  console.log(`[Bridge] Execution timeout: ${TIMEOUT_MS}ms`);
   console.log('[Bridge] Waiting for UXP plugin to connect...');
 });
