@@ -100,22 +100,24 @@ For agent visual loops, **use `capture_indesign_screen_preview`** instead of exp
 
 **Key rule:** `export_images` is for production/export sanity checks only. A screenshot is the visual truth for debugging layout because it captures the actual InDesign UI state — what the user would see — not a renderer-specific export.
 
-### Workflow:
+**Workflow:**
 1. Call `open_working_copy` to open the current document.
 2. Navigate/zoom to the target page (use `navigate_to_page` + `zoom_to_page`, or let `capture_indesign_screen_preview` handle both).
 3. Call `capture_indesign_screen_preview` with the desired `pageIndex` and `zoomMode`.
 4. Review the screenshot with your vision model.
 5. Inspect actual InDesign objects using `get_page_content_summary` / `list_page_items` before changing geometry.
 
-### Available tools:
+**Available tools:**
 - `capture_screen_preview` — Raw OS-level screenshot (PNG). No InDesign interaction.
 - `capture_indesign_screen_preview` — Navigate InDesign to a page, optionally zoom, then capture.
 
-### Important:
+**Important:**
 - Screenshots are OS-level (`screencapture` on macOS, PowerShell+WinForms on Windows, gnome-screenshot/import/grim on Linux). No InDesign export APIs are called.
 - On macOS, Screen Recording permission may be required for Terminal/the MCP process (System Settings > Privacy & Security > Screen Recording).
 - In headless or remote environments without a display, screenshot tools will return a clear error.
 - When a template workspace is active, output paths must resolve inside workspaceRoot/exports/.
+
+### Image Placement with Scaling
 
 ```javascript
 await tools.call("place_image", {

@@ -64,7 +64,7 @@ export const screenshotToolDefinitions = [
                     description: 'Delay in ms after navigation/zoom before screenshot.',
                 },
             },
-            required: ['outputPath'],
+            required: ['outputPath', 'pageIndex'],
         },
     },
 ];

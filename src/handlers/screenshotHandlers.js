@@ -15,6 +15,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ScriptExecutor } from '../core/scriptExecutor.js';
 import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
+import { PageHandlers } from './pageHandlers.js';
+import { DocumentHandlers } from './documentHandlers.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -48,6 +50,80 @@ export class ScreenshotHandlers {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    /**
+     * Validate common args shared by both screenshot tools.
+     * Returns null on success, or a formatErrorResponse on failure.
+     */
+    static validateCommonArgs(args, operation) {
+        if (!args || typeof args !== 'object') {
+            return formatErrorResponse('Args must be an object', operation);
+        }
+
+        // outputPath: required string
+        if (!args.outputPath || typeof args.outputPath !== 'string' || !args.outputPath.trim()) {
+            return formatErrorResponse('outputPath is required and must be a non-empty string', operation);
+        }
+        try {
+            const ext = path.extname(args.outputPath).toLowerCase();
+            if (ext && ext !== '.png') {
+                return formatErrorResponse('outputPath must have .png extension', operation);
+            }
+        } catch { /* resolve later */ }
+
+        // delayMs: optional integer 0..5000
+        if (args.delayMs !== undefined && args.delayMs !== null) {
+            if (!Number.isInteger(args.delayMs) || args.delayMs < 0 || args.delayMs > 5000) {
+                return formatErrorResponse(
+                    `delayMs must be an integer between 0 and 5000, got ${JSON.stringify(args.delayMs)}`,
+                    operation
+                );
+            }
+        }
+
+        // captureMode: only "screen"
+        if (args.captureMode !== undefined && args.captureMode !== null && args.captureMode !== 'screen') {
+            return formatErrorResponse(
+                `captureMode must be "screen", got ${JSON.stringify(args.captureMode)}`,
+                operation
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * Validate args specific to capture_indesign_screen_preview.
+     * Returns null on success, or a formatErrorResponse on failure.
+     */
+    static validateInDesignArgs(args, operation) {
+        const common = this.validateCommonArgs(args, operation);
+        if (common) return common;
+
+        // pageIndex: required non-negative integer
+        if (args.pageIndex === undefined || args.pageIndex === null) {
+            return formatErrorResponse('pageIndex is required for capture_indesign_screen_preview', operation);
+        }
+        if (!Number.isInteger(args.pageIndex) || args.pageIndex < 0) {
+            return formatErrorResponse(
+                `pageIndex must be a non-negative integer, got ${JSON.stringify(args.pageIndex)}`,
+                operation
+            );
+        }
+
+        // zoomMode: optional, must be valid enum value
+        const validZoomModes = ['fit_page', 'fit_spread', 'actual_size', 'none'];
+        if (args.zoomMode !== undefined && args.zoomMode !== null) {
+            if (!validZoomModes.includes(args.zoomMode)) {
+                return formatErrorResponse(
+                    `zoomMode must be one of ${validZoomModes.join(', ')}, got ${JSON.stringify(args.zoomMode)}`,
+                    operation
+                );
+            }
+        }
+
+        return null;
+    }
+
     // =================== OS-native capture ===================
 
     /**
@@ -56,7 +132,7 @@ export class ScreenshotHandlers {
      * Screen Recording permission may be required for Terminal/the MCP process.
      */
     static async captureMacOS(filePath) {
-        await execFileAsync('screencapture', ['-x', '-t', 'png', filePath], { timeout: 30000 });
+        await execFileAsync('screencapture', ['-x', '-t', 'png', filePath], { timeout: 15000 });
     }
 
     /**
@@ -82,33 +158,52 @@ $bmp.Dispose();
     }
 
     /**
-     * Linux: best-effort screenshot backends.
-     *   - gnome-screenshot (GNOME)
-     *   - import        (ImageMagick)
-     *   - grim          (wlroots-based Wayland)
+     * Linux: detect available screenshot backend, then run it.
+     * Returns the exact error from the command if a backend exists but fails
+     * (e.g. headless/no display/permissions).
      */
     static async captureLinux(filePath) {
-        // Try gnome-screenshot first
-        try {
-            await execFileAsync('gnome-screenshot', ['-f', filePath], { timeout: 15000 });
-            return;
-        } catch { /* fall through */ }
+        // Detect available backends with command -v
+        const backends = [
+            { cmd: 'gnome-screenshot', args: ['-f', filePath], name: 'gnome-screenshot' },
+            { cmd: 'import', args: ['-window', 'root', filePath], name: 'ImageMagick import' },
+            { cmd: 'grim', args: [filePath], name: 'grim' },
+        ];
 
-        // Try ImageMagick import
-        try {
-            await execFileAsync('import', ['-window', 'root', filePath], { timeout: 15000 });
-            return;
-        } catch { /* fall through */ }
+        const available = [];
+        const errors = [];
 
-        // Try grim (wlroots Wayland)
-        try {
-            await execFileAsync('grim', [filePath], { timeout: 15000 });
-            return;
-        } catch { /* fall through */ }
+        for (const backend of backends) {
+            try {
+                await execFileAsync('which', [backend.cmd], { timeout: 3000 });
+                available.push(backend);
+            } catch {
+                // not found, skip
+            }
+        }
+
+        if (available.length === 0) {
+            throw new Error(
+                'No supported Linux screenshot backend found. ' +
+                'Install gnome-screenshot, ImageMagick import, or grim.'
+            );
+        }
+
+        // Try each available backend in order
+        for (const backend of available) {
+            try {
+                await execFileAsync(backend.cmd, backend.args, { timeout: 10000 });
+                return; // success
+            } catch (err) {
+                // ponytail: only keep the first available backend's stderr — it's the most actionable
+                const stderr = err.stderr ? err.stderr.toString().trim() : '';
+                const reason = stderr || err.message || 'unknown error';
+                errors.push(`${backend.name}: ${reason}`);
+            }
+        }
 
         throw new Error(
-            'No supported Linux screenshot backend found. ' +
-            'Install gnome-screenshot, ImageMagick import, or grim.'
+            `All available screenshot backends failed:\n${errors.join('\n')}`
         );
     }
 
@@ -138,20 +233,15 @@ $bmp.Dispose();
      * capture_screen_preview — OS-level screenshot of the current visible screen.
      */
     static async captureScreenPreview(args) {
-        const {
-            outputPath,
-            delayMs = 300,
-            captureMode = 'screen',
-        } = args || {};
+        const operation = 'Capture Screen Preview';
+
+        // Validate all args before any side effects
+        const validationError = this.validateCommonArgs(args, operation);
+        if (validationError) return validationError;
 
         try {
-            // Validate capture mode
-            if (captureMode !== 'screen') {
-                return formatErrorResponse(
-                    `Unsupported captureMode: "${captureMode}". Only "screen" is supported.`,
-                    'Capture Screen Preview'
-                );
-            }
+            const outputPath = args.outputPath;
+            const delayMs = args.delayMs ?? 300;
 
             // Normalize output path
             const normalizedPath = this.normalizePngPath(outputPath);
@@ -162,7 +252,7 @@ $bmp.Dispose();
             } catch (dirErr) {
                 return formatErrorResponse(
                     `Cannot create output directory: ${dirErr.message}`,
-                    'Capture Screen Preview'
+                    operation
                 );
             }
 
@@ -181,7 +271,7 @@ $bmp.Dispose();
                     : '';
                 return formatErrorResponse(
                     `Screenshot capture failed: ${captureErr.message}${note}`,
-                    'Capture Screen Preview'
+                    operation
                 );
             }
 
@@ -189,7 +279,7 @@ $bmp.Dispose();
             if (!fs.existsSync(normalizedPath)) {
                 return formatErrorResponse(
                     'Screenshot command completed but output file was not created',
-                    'Capture Screen Preview'
+                    operation
                 );
             }
 
@@ -197,7 +287,7 @@ $bmp.Dispose();
             if (stat.size === 0) {
                 return formatErrorResponse(
                     'Screenshot file was created but is empty (0 bytes)',
-                    'Capture Screen Preview'
+                    operation
                 );
             }
 
@@ -209,9 +299,9 @@ $bmp.Dispose();
                 note: 'OS-level screenshot; not an InDesign export',
                 platform,
                 capturedAt: new Date().toISOString(),
-            }, 'Capture Screen Preview');
+            }, operation);
         } catch (err) {
-            return formatErrorResponse(err.message, 'Capture Screen Preview');
+            return formatErrorResponse(err.message, operation);
         }
     }
 
@@ -219,103 +309,74 @@ $bmp.Dispose();
      * capture_indesign_screen_preview — Navigate InDesign to a page, optionally
      * fit/zoom, then take an OS-level screenshot.
      *
-     * This uses UXP code to navigate and zoom inside InDesign, then calls
-     * captureScreenPreview for the screenshot. No InDesign export APIs are used.
+     * Navigation reuses PageHandlers.navigateToPage (proven UXP code path).
+     * Zoom reuses DocumentHandlers.zoomToPage for fit_page/actual_size.
+     * fit_spread is not supported by the existing zoom handler.
+     * No InDesign export APIs are used.
      */
     static async captureInDesignScreenPreview(args) {
-        const {
-            outputPath,
-            pageIndex,
-            zoomMode = 'fit_page',
-            delayMs = 700,
-        } = args || {};
+        const operation = 'Capture InDesign Screen Preview';
+
+        // Validate all args before any side effects or UXP execution
+        const validationError = this.validateInDesignArgs(args, operation);
+        if (validationError) return validationError;
 
         try {
-            // --- Phase 1: Navigate and zoom inside InDesign ---
-            // Build UXP code for navigation and zoom
-            const uxpCodeParts = [];
+            const { outputPath, pageIndex, zoomMode = 'fit_page', delayMs = 700 } = args;
 
-            if (pageIndex !== undefined && pageIndex !== null) {
-                uxpCodeParts.push(`
-                    if (app.documents.length === 0) {
-                        return { success: false, error: 'No document open' };
-                    }
-                    const doc = app.activeDocument;
-                    if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) {
-                        return { success: false, error: 'Page index out of range' };
-                    }
-                    const page = doc.pages.item(${pageIndex});
-                    page.select();
-                `);
+            // Early check: fit_spread is not supported by the existing zoom handler.
+            // Must check before any UXP calls to fail fast.
+            if (zoomMode === 'fit_spread') {
+                return formatErrorResponse(
+                    'zoomMode "fit_spread" is not supported by the existing zoom handler. ' +
+                    'Use "fit_page", "actual_size", or "none" instead.',
+                    operation
+                );
+            }
 
-                // Zoom after navigation
-                if (zoomMode && zoomMode !== 'none') {
-                    switch (zoomMode) {
-                        case 'fit_page':
-                            // InDesign UXP: zoomToFit with a zoom level that fits the page
-                            uxpCodeParts.push(`
-                                try {
-                                    page.zoomToFit();
-                                } catch(e) {
-                                    // fallback: set zoom to 100%
-                                    if (app.activeWindow) {
-                                        app.activeWindow.zoomPercentage = 100;
-                                    }
-                                }
-                            `);
-                            break;
-                        case 'fit_spread':
-                            uxpCodeParts.push(`
-                                try {
-                                    const spread = page.parent;
-                                    if (spread && app.activeWindow) {
-                                        app.activeWindow.zoomPercentage = Math.min(
-                                            100,
-                                            Math.floor(
-                                                (app.activeWindow.screenDrawingWidth / spread.bounds[3]) * 100
-                                            )
-                                        );
-                                    }
-                                } catch(e) {
-                                    // fallback if spread zoom fails
-                                }
-                            `);
-                            break;
-                        case 'actual_size':
-                            uxpCodeParts.push(`
-                                try {
-                                    if (app.activeWindow) {
-                                        app.activeWindow.zoomPercentage = 100;
-                                    }
-                                } catch(e) {}
-                            `);
-                            break;
-                        // 'none' — skipped above
-                    }
+            // --- Phase 1: Navigate using the proven handler ---
+            const navResult = await PageHandlers.navigateToPage({ pageIndex });
+            if (!navResult?.success) {
+                return formatErrorResponse(
+                    navResult?.result || 'Failed to navigate to page',
+                    operation
+                );
+            }
+
+            // --- Phase 2: Zoom using the proven handler ---
+            if (zoomMode !== 'none') {
+                switch (zoomMode) {
+                    case 'fit_page':
+                        // zoomToPage with zoomLevel=100 fits page to window at 100%
+                        const fitResult = await DocumentHandlers.zoomToPage({ pageIndex, zoomLevel: 100 });
+                        if (!fitResult?.success) {
+                            return formatErrorResponse(
+                                fitResult?.result || 'Failed to zoom to page',
+                                operation
+                            );
+                        }
+                        break;
+
+                    case 'actual_size':
+                        const actualResult = await DocumentHandlers.zoomToPage({ pageIndex, zoomLevel: 100 });
+                        if (!actualResult?.success) {
+                            return formatErrorResponse(
+                                actualResult?.result || 'Failed to set actual size zoom',
+                                operation
+                            );
+                        }
+                        break;
+
+                    // 'none' — handled above
                 }
             }
 
-            // If we have UXP commands, execute them
-            if (uxpCodeParts.length > 0) {
-                const uxpCode = uxpCodeParts.join('\n') + `
-                    return { success: true };
-                `;
-
-                const result = await ScriptExecutor.executeViaUXP(uxpCode);
-                if (!result?.success) {
-                    return formatErrorResponse(
-                        result?.error || 'Failed to navigate/zoom in InDesign',
-                        'Capture InDesign Screen Preview'
-                    );
-                }
-            }
-
-            // --- Phase 2: Wait for UI to settle ---
+            // --- Phase 3: Wait for UI to settle ---
             if (delayMs > 0) {
                 await this.sleep(delayMs);
             }
 
-            // --- Phase 3: Take the screenshot ---
+            // --- Phase 4: Take the screenshot ---
             // Delegate to captureScreenPreview with delayMs=0 (we already waited)
             return await this.captureScreenPreview({
                 outputPath,
@@ -323,7 +384,7 @@ $bmp.Dispose();
                 captureMode: 'screen',
             });
         } catch (err) {
-            return formatErrorResponse(err.message, 'Capture InDesign Screen Preview');
+            return formatErrorResponse(err.message, operation);
         }
     }
 }
