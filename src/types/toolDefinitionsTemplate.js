@@ -315,6 +315,7 @@ const derivativeToolDefinitions = [
                 includeDocumentLinkCheck: { type: 'boolean', description: 'Explicitly run document-global link check even if requireNoMissingLinks is not set' },
                 includeDocumentFontCheck: { type: 'boolean', description: 'Explicitly run document-global font check even if requireNoMissingFonts is not set' },
                 diagnostics: { type: 'boolean', default: false, description: 'Return traceId, phase timings, and item counts' },
+                traceId: { type: 'string' },
                 includeOversetExcerpt: { type: 'boolean', default: false, description: 'Include short text excerpt in overset evidence' }
             }),
             anyOf: [{ required: ['derivativeId'] }, { required: ['pageIndex'] }]
