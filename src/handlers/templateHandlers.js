@@ -6,6 +6,8 @@ import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
 import { initWorkspace, attachWorkspace, loadWorkspace, getWorkspace, saveWorkspace, nextVersionId, upsertDerivative, upsertDerivativePage, fileStatEvidence, validateWorkspaceFiles } from '../core/workspaceState.js';
 import { assertWorkspacePath, safeBasename } from '../utils/pathGuard.js';
 import { imageInfo } from '../utils/imageInfo.js';
+import { appendRuntimeLog, readRuntimeLogs, resolveRuntimeLogPath } from '../core/runtimeLogger.js';
+import os from 'node:os';
 
 const LABEL_KEY = 'mcpTemplateLabel';
 
@@ -17,6 +19,12 @@ function generateTraceId() {
 function logPhase(fields) {
     const entry = { ts: new Date().toISOString(), component: 'TemplateHandlers', ...fields };
     process.stderr.write(JSON.stringify(entry) + '\n');
+    try {
+        const manifest = loadWorkspace();
+        appendRuntimeLog(entry, manifest.workspaceRoot);
+    } catch {
+        appendRuntimeLog(entry);
+    }
 }
 
 async function timedPhase(trace, phase, fn) {
@@ -123,6 +131,53 @@ function appendJsonl(filePath, record) {
     fs.appendFileSync(filePath, `${JSON.stringify(record)}\n`);
 }
 
+function readJsonlRecords(filePath, { limit = Infinity, filter = null } = {}) {
+    const logs = [];
+    const warnings = [];
+    if (!fs.existsSync(filePath)) return { logs, warnings, source: filePath };
+    const raw = fs.readFileSync(filePath, 'utf8');
+    for (const line of raw.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+            const parsed = JSON.parse(line);
+            if (filter && !filter(parsed)) continue;
+            logs.push(parsed);
+        } catch {
+            warnings.push(`Skipped malformed line in ${path.basename(filePath)}`);
+        }
+    }
+    return { logs: logs.slice(-limit), warnings, source: filePath };
+}
+
+function bridgeLogPaths() {
+    const fallback = path.join(os.homedir(), '.indesign-agent', 'logs', 'bridge.jsonl');
+    const envPath = process.env.INDESIGN_BRIDGE_LOG_PATH;
+    return [...new Set([envPath, fallback].filter(Boolean))];
+}
+
+function readBridgeLogs(options = {}) {
+    const { limit = 200, component, traceId, toolName, phase, event, sinceTs } = options;
+    const sources = bridgeLogPaths();
+    const logs = [];
+    const warnings = [];
+    for (const source of sources) {
+        const result = readJsonlRecords(source, {
+            filter: (entry) => {
+                if (component && entry.component !== component) return false;
+                if (traceId && entry.traceId !== traceId) return false;
+                if (toolName && entry.toolName !== toolName) return false;
+                if (phase && entry.phase !== phase) return false;
+                if (event && entry.event !== event) return false;
+                if (sinceTs && entry.ts && entry.ts < sinceTs) return false;
+                return true;
+            }
+        });
+        logs.push(...result.logs);
+        warnings.push(...result.warnings);
+    }
+    return { logs: logs.slice(-limit), warnings, sources, limit, order: 'oldest_to_newest' };
+}
+
 function shallowMergeLabel(base, patch) {
     return { ...(base || {}), ...(patch || {}) };
 }
@@ -139,7 +194,25 @@ function activeGuardCode(body) {
         function normalizeDocPath(rawPath, docName) { const base = nativePath(rawPath); const name = String(docName || ''); if (!base) return ''; if (name && !/\.indd$/i.test(base)) return joinDocPath(base, name); return base; }
         try { activePath = normalizeDocPath(await doc.filePath, doc.name) || normalizeDocPath(await doc.fullName, doc.name); } catch(e) {}
         if (!activePath || activePath !== expected) return { success:false, error:'Active document is not workspace working copy', activeDocumentPath: activePath || null, workingCopyPath: expected };
-        ${body}
+        // Unit guard: force InDesign geometry units to points so all returned geometry is canonical pt
+        const __savedH = doc.viewPreferences.horizontalMeasurementUnits;
+        const __savedV = doc.viewPreferences.verticalMeasurementUnits;
+        let __savedPref = null;
+        try { __savedPref = app.scriptPreferences.measurementUnit; } catch(e) {}
+        const __indesign = require('indesign');
+        const __pt = pickEnum(__indesign.MeasurementUnits || {}, ['POINTS','points','POINT','point'], null);
+        if (__pt == null) throw new Error('Unable to force InDesign measurement units to points; refusing to run template geometry tool because returned geometry would be ambiguous.');
+        doc.viewPreferences.horizontalMeasurementUnits = __pt;
+        doc.viewPreferences.verticalMeasurementUnits = __pt;
+        try { if (__savedPref != null) app.scriptPreferences.measurementUnit = __pt; } catch(e) {}
+        try {
+            const __unitResult = await (async () => { ${body} })();
+            return __unitResult;
+        } finally {
+            try { doc.viewPreferences.horizontalMeasurementUnits = __savedH; } catch(e) {}
+            try { doc.viewPreferences.verticalMeasurementUnits = __savedV; } catch(e) {}
+            try { if (__savedPref != null) app.scriptPreferences.measurementUnit = __savedPref; } catch(e) {}
+        }
     `;
 }
 
@@ -154,6 +227,9 @@ async function runGuarded(body, options = {}) {
 
 function jsHelpers() {
     return `
+        function pickEnum(obj, candidates, fallback){ for(const k of candidates){ try{ const v = obj[k]; if(v != null) return v; } catch(e){} } return fallback; }
+        function boundsSize(b){ return { width: b[3]-b[1], height: b[2]-b[0] }; }
+        function assertApproxPageSize(actual, expected, eps, ctx){ const w = boundsSize(actual).width; const h = boundsSize(actual).height; if(Math.abs(w-expected.width) > eps || Math.abs(h-expected.height) > eps) throw new Error('Geometry unit mismatch after '+ctx+': requested '+expected.width+'x'+expected.height+'pt, got '+w+'x'+h+' from page.bounds. Refusing to continue because MCP geometry must be canonical pt.'); }
         function at(c, i){ return c.item ? c.item(i) : c[i]; }
         function len(c){ try { return c.length || 0; } catch(e) { return 0; } }
         function arr(c, fn){ const out=[]; for (let i=0;i<len(c);i++){ try { out.push(fn(at(c,i), i)); } catch(e){ out.push({ index:i, warning:String(e) }); } } return out; }
@@ -492,6 +568,102 @@ export class TemplateHandlers {
 
     static get_derivative_status(args = {}) {
         return response(loadWorkspace().derivatives.find((d) => d.derivativeId === args.derivativeId) || null, 'get_derivative_status');
+    }
+
+    static get_runtime_logs(args = {}) {
+        return response((async () => {
+            const limit = Math.max(1, Number(args.limit || 200));
+            const filters = {
+                component: args.component || null,
+                traceId: args.traceId || null,
+                toolName: args.toolName || null,
+                phase: args.phase || null,
+                event: args.event || null,
+                sinceTs: args.sinceTs || null
+            };
+            const logs = [];
+            const sources = [];
+            const warnings = [];
+            if (args.includeRuntime !== false) {
+                let workspaceRoot = null;
+                try { workspaceRoot = loadWorkspace().workspaceRoot; } catch {}
+                const runtime = readRuntimeLogs({ ...filters, limit, workspaceRoot });
+                logs.push(...runtime.logs);
+                sources.push(...runtime.sources);
+                if (runtime.warnings) warnings.push(...runtime.warnings);
+            }
+            if (args.includeBridge !== false) {
+                const bridge = readBridgeLogs({ ...filters, limit });
+                logs.push(...bridge.logs);
+                sources.push(...bridge.sources);
+                if (bridge.warnings) warnings.push(...bridge.warnings);
+            }
+            logs.sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')));
+            return { success: true, logs: logs.slice(-limit), sources: [...new Set(sources)], warnings: [...new Set(warnings)], limit, order: 'oldest_to_newest', filters };
+        })(), 'get_runtime_logs');
+    }
+
+    static get_debug_bundle(args = {}) {
+        return response((async () => {
+            const limit = Math.max(1, Number(args.limit || 200));
+            const warnings = [];
+            let workspaceStatus = null;
+            let derivativeStatus = null;
+            let visualReviews = [];
+            let inspectionSnapshots = [];
+            let runtimeLogs = { logs: [], sources: [], warnings: [] };
+            let bridgeLogs = { logs: [], sources: [], warnings: [] };
+            try {
+                const manifest = loadWorkspace();
+                workspaceStatus = {
+                    success: true,
+                    workspaceRoot: manifest.workspaceRoot,
+                    workingCopyPath: manifest.workingCopyPath,
+                    inputCopyPath: manifest.inputCopyPath,
+                    folders: workspaceFolders(manifest),
+                    versionCount: manifest.versions?.length || 0,
+                    previewCount: manifest.previews?.length || 0,
+                    derivatives: manifest.derivatives || []
+                };
+                if (args.derivativeId) derivativeStatus = manifest.derivatives.find((d) => d.derivativeId === args.derivativeId) || null;
+                if (args.includeVisualReviews !== false) {
+                    const p = path.join(manifest.workspaceRoot, 'logs', 'visual_reviews.jsonl');
+                    visualReviews = readJsonlRecords(p, { limit }).logs.filter((review) => !args.derivativeId || review.derivativeId === args.derivativeId);
+                }
+                if (args.includeInspections !== false) {
+                    inspectionSnapshots = this.loadInspectionSnapshots(manifest).filter((snapshot) => !args.derivativeId || snapshot.derivativeId === args.derivativeId).slice(-limit);
+                }
+            } catch (error) {
+                warnings.push(error.message);
+                workspaceStatus = { success: false, error: error.message };
+            }
+            try {
+                bridgeLogs = readBridgeLogs({ traceId: args.traceId || null, limit });
+                if (bridgeLogs.warnings) warnings.push(...bridgeLogs.warnings);
+            } catch (error) {
+                warnings.push(error.message);
+            }
+            try {
+                let workspaceRoot = null;
+                try { workspaceRoot = loadWorkspace().workspaceRoot; } catch {}
+                runtimeLogs = readRuntimeLogs({ traceId: args.traceId || null, limit, workspaceRoot });
+                if (runtimeLogs.warnings) warnings.push(...runtimeLogs.warnings);
+            } catch (error) {
+                warnings.push(error.message);
+            }
+            let bridgeStatus = await ScriptExecutor.bridgeStatus();
+            return {
+                success: true,
+                workspaceStatus,
+                bridgeStatus,
+                runtimeLogs: args.includeLogs === false ? null : runtimeLogs,
+                bridgeLogs: args.includeLogs === false ? null : bridgeLogs,
+                visualReviews,
+                inspectionSnapshots,
+                derivativeStatus,
+                warnings: [...new Set(warnings)]
+            };
+        })(), 'get_debug_bundle');
     }
 
     static create_derivative_page(args = {}) {
@@ -1750,6 +1922,17 @@ function buildCreateObjectScript() {
                 if (dims) p.adjustLayout({ width:dims.width, height:dims.height });
                 const margins = applyPageMargins(p,args);
                 const bounds = clone(safe(()=>p.bounds));
+                if (dims) {
+                    const actual = boundsSize(bounds || [0,0,0,0]);
+                    if (Math.abs(actual.width - dims.width) > 0.5 || Math.abs(actual.height - dims.height) > 0.5) {
+                        const documentUnits = safe(() => ({
+                            horizontalMeasurementUnits: String(doc.viewPreferences.horizontalMeasurementUnits),
+                            verticalMeasurementUnits: String(doc.viewPreferences.verticalMeasurementUnits),
+                            rulerOrigin: String(doc.viewPreferences.rulerOrigin)
+                        }), null);
+                        throw new Error('Geometry unit mismatch after create_page: requested ' + dims.width + 'x' + dims.height + 'pt, got ' + actual.width + 'x' + actual.height + ' from page.bounds. pageBounds=' + JSON.stringify(bounds) + '. documentUnits=' + JSON.stringify(documentUnits) + '. Refusing to continue because MCP geometry must be canonical pt.');
+                    }
+                }
                 return { success:true, pageIndex:collectionIndexById(doc.pages, p), pageId:safe(()=>p.id), name:safe(()=>p.name), pageBounds:bounds, spreadIndex:collectionIndexById(doc.spreads, safe(()=>p.parent, null)), derivativeId:args.derivativeId||null, pageSize:safe(()=>({ width:p.bounds[3]-p.bounds[1], height:p.bounds[2]-p.bounds[0], unit:'pt' }), dims), margins };
             } catch (e) { try { p.remove(); } catch(_) {} throw e; }
         }

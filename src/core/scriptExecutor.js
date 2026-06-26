@@ -2,6 +2,8 @@
  * Core script execution functionality
  */
 import crypto from 'node:crypto';
+import { appendRuntimeLog, resolveRuntimeLogPath } from './runtimeLogger.js';
+import { loadWorkspace } from './workspaceState.js';
 
 export const BRIDGE_URL = process.env.BRIDGE_URL || 'http://127.0.0.1:3000';
 
@@ -22,9 +24,14 @@ function generateTraceId() {
 }
 
 function logEvent(fields) {
-    // Single-line JSON to stderr so it doesn't interfere with MCP stdio protocol
     const entry = { ts: new Date().toISOString(), component: 'ScriptExecutor', ...fields };
     process.stderr.write(JSON.stringify(entry) + '\n');
+    try {
+        const manifest = loadWorkspace();
+        appendRuntimeLog(entry, manifest.workspaceRoot);
+    } catch {
+        appendRuntimeLog(entry);
+    }
 }
 
 /**

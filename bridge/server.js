@@ -1,6 +1,7 @@
 const { WebSocketServer } = require('ws');
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
+const { appendBridgeLog } = require('./runtimeLogger.cjs');
 
 const WS_PORT = 3001;
 const HTTP_PORT = 3000;
@@ -14,6 +15,7 @@ const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || null;
 if (!BRIDGE_TOKEN) {
   console.warn('[Bridge] WARNING: BRIDGE_TOKEN not set. Any local process can send InDesign commands.');
   console.warn('[Bridge]   To enable auth: export BRIDGE_TOKEN="$(openssl rand -hex 32)" before starting.');
+  appendBridgeLog({ event: 'startup_warning', ok: false, error: 'BRIDGE_TOKEN not set; bridge accepts unauthenticated local requests' });
 }
 
 const app = express();
@@ -33,6 +35,7 @@ if (BRIDGE_TOKEN) {
 function logEvent(fields) {
   const entry = { ts: new Date().toISOString(), component: 'Bridge', ...fields };
   console.error(JSON.stringify(entry));
+  try { appendBridgeLog(fields); } catch {}
 }
 
 let pluginSocket = null;
@@ -342,4 +345,5 @@ app.listen(HTTP_PORT, '127.0.0.1', () => {
   console.log(`[Bridge] WebSocket server on ws://127.0.0.1:${WS_PORT}`);
   console.log(`[Bridge] Execution timeout: ${TIMEOUT_MS}ms`);
   console.log('[Bridge] Waiting for UXP plugin to connect...');
+  logEvent({ event: 'startup_listen', httpPort: HTTP_PORT, wsPort: WS_PORT, timeoutMs: TIMEOUT_MS, ok: true });
 });

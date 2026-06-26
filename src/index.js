@@ -5,11 +5,16 @@ import { InDesignMCPServer } from './core/InDesignMCPServer.js';
 import { startHttpTransport } from './core/httpTransport.js';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import path from 'node:path';
 import net from 'net';
+import fs from 'node:fs';
+import os from 'node:os';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE_PORT = 3001;
+
+const BRIDGE_DIR = (dir) => dir || path.join(os.homedir(), '.indesign-agent');
+const BRIDGE_PID_FILE = path.join(BRIDGE_DIR(), 'bridge.pid');
 
 function isBridgeRunning() {
     return new Promise((resolve) => {
@@ -20,11 +25,18 @@ function isBridgeRunning() {
 }
 
 function startBridge() {
-    const bridgePath = join(__dirname, '../bridge/server.js');
+    const bridgePath = path.join(__dirname, '../bridge/server.js');
+    fs.mkdirSync(BRIDGE_DIR(), { recursive: true });
+    const outFile = path.join(BRIDGE_DIR(), 'logs', 'bridge-stdout.log');
+    const errFile = path.join(BRIDGE_DIR(), 'logs', 'bridge-stderr.log');
+    fs.mkdirSync(path.dirname(outFile), { recursive: true });
+    const out = fs.openSync(outFile, 'a');
+    const err = fs.openSync(errFile, 'a');
     const child = spawn('node', [bridgePath], {
         detached: true,
-        stdio: 'ignore',
+        stdio: ['ignore', out, err],
     });
+    fs.writeFileSync(BRIDGE_PID_FILE, String(child.pid));
     child.unref();
     console.error('[MCP] Bridge server started (pid ' + child.pid + ')');
 }
