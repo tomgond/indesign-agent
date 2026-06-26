@@ -17,6 +17,9 @@ This is not the old AppleScript server. Do not assume temp JSX files, AppleScrip
 
 - `../README.md`
 - `../AGENTS.md`
+- `../.codex/skills/indesign-mcp-repo/SKILL.md`
+- `../.codex/skills/indesign-template-agent/SKILL.md`
+- `../.codex/skills/indesign-template-orchestrator/SKILL.md`
 - `../.opencode/skills/indesign-mcp-repo/SKILL.md`
 - `../.opencode/skills/indesign-template-agent/SKILL.md`
 - `./live-mcp-validation.md`
@@ -132,6 +135,9 @@ Keep these aligned:
 
 - `README.md` for human setup and architecture overview
 - `AGENTS.md` for repo working rules
+- `.codex/skills/indesign-mcp-repo/SKILL.md` for repo-local Codex guidance
+- `.codex/skills/indesign-template-agent/SKILL.md` for derivative/template operator guidance
+- `.codex/skills/indesign-template-orchestrator/SKILL.md` for end-to-end template workflow orchestration
 - `.opencode/skills/indesign-mcp-repo/SKILL.md` for repo-local opencode guidance
 - `.opencode/skills/indesign-template-agent/SKILL.md` for derivative/template workspace guidance
 - `docs/live-mcp-validation.md` for live coverage status

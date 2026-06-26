@@ -40,5 +40,8 @@ Some flows require a live Mac/InDesign/UXP environment. If that environment is u
 
 Repo-specific opencode guidance lives here:
 
+- `.codex/skills/indesign-mcp-repo/SKILL.md`
+- `.codex/skills/indesign-template-agent/SKILL.md`
+- `.codex/skills/indesign-template-orchestrator/SKILL.md`
 - `.opencode/skills/indesign-mcp-repo/SKILL.md`
 - `.opencode/skills/indesign-template-agent/SKILL.md`

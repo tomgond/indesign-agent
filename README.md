@@ -8,6 +8,9 @@ Agent and repo-specific guidance:
 
 - `AGENTS.md`
 - `docs/MCP_INSTRUCTIONS.md`
+- `.codex/skills/indesign-mcp-repo/SKILL.md`
+- `.codex/skills/indesign-template-agent/SKILL.md`
+- `.codex/skills/indesign-template-orchestrator/SKILL.md`
 - `.opencode/skills/indesign-mcp-repo/SKILL.md`
 - `.opencode/skills/indesign-template-agent/SKILL.md`
 
