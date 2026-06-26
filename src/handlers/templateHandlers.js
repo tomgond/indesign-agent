@@ -182,7 +182,7 @@ function shallowMergeLabel(base, patch) {
     return { ...(base || {}), ...(patch || {}) };
 }
 
-function activeGuardCode(body) {
+export function activeGuardCode(body) {
     const { workingCopyPath } = loadWorkspace();
     return `
         const expected = ${q(path.resolve(workingCopyPath))};
@@ -195,17 +195,18 @@ function activeGuardCode(body) {
         try { activePath = normalizeDocPath(await doc.filePath, doc.name) || normalizeDocPath(await doc.fullName, doc.name); } catch(e) {}
         if (!activePath || activePath !== expected) return { success:false, error:'Active document is not workspace working copy', activeDocumentPath: activePath || null, workingCopyPath: expected };
         // Unit guard: force InDesign geometry units to points so all returned geometry is canonical pt
+        function __pickEnum(obj, candidates, fallback){ for(const k of candidates){ try{ const v = obj && obj[k]; if(v != null) return v; } catch(e){} } return fallback; }
+        const __indesign = require('indesign');
+        const __pt = __pickEnum(__indesign.MeasurementUnits || {}, ['POINTS','points','POINT','point'], null);
+        if (__pt == null) throw new Error('Unable to force InDesign measurement units to points; refusing to run template geometry tool because returned geometry would be ambiguous.');
         const __savedH = doc.viewPreferences.horizontalMeasurementUnits;
         const __savedV = doc.viewPreferences.verticalMeasurementUnits;
         let __savedPref = null;
         try { __savedPref = app.scriptPreferences.measurementUnit; } catch(e) {}
-        const __indesign = require('indesign');
-        const __pt = pickEnum(__indesign.MeasurementUnits || {}, ['POINTS','points','POINT','point'], null);
-        if (__pt == null) throw new Error('Unable to force InDesign measurement units to points; refusing to run template geometry tool because returned geometry would be ambiguous.');
-        doc.viewPreferences.horizontalMeasurementUnits = __pt;
-        doc.viewPreferences.verticalMeasurementUnits = __pt;
-        try { if (__savedPref != null) app.scriptPreferences.measurementUnit = __pt; } catch(e) {}
         try {
+            doc.viewPreferences.horizontalMeasurementUnits = __pt;
+            doc.viewPreferences.verticalMeasurementUnits = __pt;
+            try { if (__savedPref != null) app.scriptPreferences.measurementUnit = __pt; } catch(e) {}
             const __unitResult = await (async () => { ${body} })();
             return __unitResult;
         } finally {
