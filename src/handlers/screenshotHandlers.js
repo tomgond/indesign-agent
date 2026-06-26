@@ -347,7 +347,7 @@ $bmp.Dispose();
             if (zoomMode !== 'none') {
                 switch (zoomMode) {
                     case 'fit_page':
-                        // zoomToPage with zoomLevel=100 fits page to window at 100%
+                        // zoomToPage performs the supported InDesign window/page zoom operation.
                         const fitResult = await DocumentHandlers.zoomToPage({ pageIndex, zoomLevel: 100 });
                         if (!fitResult?.success) {
                             return formatErrorResponse(

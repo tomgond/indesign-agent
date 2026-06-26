@@ -318,9 +318,44 @@ export class DocumentHandlers {
             if (${pageIndex} < 0 || ${pageIndex} >= doc.pages.length) {
                 return { success: false, error: 'Page index out of range' };
             }
-            const page = doc.pages.item(${pageIndex});
-            await page.zoomToFit(${zoomLevel});
-            return { success: true, message: 'Zoomed to page ${pageIndex} at ${zoomLevel}%' };
+            // Select the target page
+            doc.pages.item(${pageIndex}).select();
+
+            const window = app.activeWindow;
+            if (!window) {
+                return { success: false, error: 'No active window for zoom operation' };
+            }
+
+            // Primary: window-level fit-page via ZoomOptions
+            // Fallback: numeric zoomPercentage (already proven via utilityHandlers)
+            let zoomApplied = false;
+            const attemptedApis = [];
+
+            try {
+                const { ZoomOptions } = require('indesign');
+                window.zoom(ZoomOptions.fitPageInWindow);
+                zoomApplied = true;
+            } catch (e) {
+                attemptedApis.push('window.zoom(ZoomOptions.fitPageInWindow): ' + e.message);
+            }
+
+            if (!zoomApplied) {
+                try {
+                    window.zoomPercentage = ${zoomLevel};
+                    zoomApplied = true;
+                } catch (e) {
+                    attemptedApis.push('window.zoomPercentage: ' + e.message);
+                }
+            }
+
+            if (!zoomApplied) {
+                return {
+                    success: false,
+                    error: 'Zoom not available. Attempted APIs: ' + attemptedApis.join('; ')
+                };
+            }
+
+            return { success: true, message: 'Zoomed to page ${pageIndex}' };
         `;
 
         const result = await ScriptExecutor.executeViaUXP(code);

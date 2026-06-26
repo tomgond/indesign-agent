@@ -10,6 +10,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ScreenshotHandlers } from '../src/handlers/screenshotHandlers.js';
 
+// Regression guard: DocumentHandlers.zoomToPage must NOT use page.zoomToFit
+const documentHandlersSrc = fs.readFileSync(
+    new URL('../src/handlers/documentHandlers.js', import.meta.url),
+    'utf8'
+);
+const hasZoomToFit = /page\s*\.\s*zoomToFit/.test(documentHandlersSrc);
+if (hasZoomToFit) {
+    console.error('REGRESSION: page.zoomToFit still present in documentHandlers.js');
+    process.exit(1);
+}
+
 let passed = 0;
 let failed = 0;
 let skipped = 0;
@@ -172,6 +183,18 @@ async function runTests() {
 
     r = await ScreenshotHandlers.captureInDesignScreenPreview({ outputPath: '/tmp/test.png', pageIndex: 0, zoomMode: 'fit_spread' });
     assertErrorResponse(r, 'fit_spread returns unsupported error before UXP', 'not supported');
+
+    r = await ScreenshotHandlers.captureInDesignScreenPreview({ outputPath: '/tmp/test.png', pageIndex: 0, zoomMode: 'actual_size' });
+    assertErrorResponse(r, 'actual_size rejected before UXP', 'zoomMode');
+
+    r = await ScreenshotHandlers.captureInDesignScreenPreview({ outputPath: '/tmp/test.png', pageIndex: 0, zoomMode: 'fit_document' });
+    assertErrorResponse(r, 'fit_document rejected before UXP', 'zoomMode');
+
+    r = await ScreenshotHandlers.captureInDesignScreenPreview({ outputPath: '/tmp/test.png', pageIndex: 0, zoomMode: 'none', delayMs: 10 });
+    // Should fail at UXP (no bridge), not at validation — zoomMode none means skip zoom entirely
+    assert('none zoomMode bypasses zoom (fails at UXP not validation)',
+        r && r.success === false && typeof r.result === 'string' &&
+        !r.result.includes('zoomMode'));
 
     // ===== OS capture in headless =====
     console.log('\n--- OS capture behavior ---');
