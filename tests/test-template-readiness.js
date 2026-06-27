@@ -18,6 +18,8 @@ fs.writeFileSync(original, 'fake-indd-bytes');
 try {
     const manifest = initWorkspace({ originalSourcePath: original, workspaceRoot, overwriteExistingWorkspace: true });
     const expectedWorkingCopyPath = path.resolve(manifest.workingCopyPath);
+    const code = buildEnsureTemplateReadyCode(expectedWorkingCopyPath, { allowSwitchDocument: true, openIfMissing: true });
+    const run = new AsyncFunction('app', code);
 
     const badDoc = {
         name: 'Unsaved.indd',
@@ -60,8 +62,6 @@ try {
         }
     };
 
-    const code = buildEnsureTemplateReadyCode(expectedWorkingCopyPath, { allowSwitchDocument: true, openIfMissing: true });
-    const run = new AsyncFunction('app', code);
     const result = await run(app);
 
     assert.equal(result.success, true);
@@ -72,6 +72,27 @@ try {
     assert.ok(Array.isArray(result.pathReadWarnings));
     assert.ok(result.pathReadWarnings.some((warning) => warning.property === 'filePath' && warning.name === 'Unsaved.indd'));
     assert.ok(result.pathReadWarnings.some((warning) => warning.property === 'fullName' && warning.name === 'Unsaved.indd'));
+
+    const noAppResult = await run(undefined);
+    assert.equal(noAppResult.success, false);
+    assert.equal(noAppResult.errorCode, 'UXP_APP_UNAVAILABLE');
+    assert.equal(noAppResult.error, 'InDesign UXP app object is unavailable');
+
+    let openAttempted = false;
+    const documentsThrowResult = await run({
+        get documents() {
+            throw new Error('documents getter exploded');
+        },
+        async open() {
+            openAttempted = true;
+            throw new Error('should not be called');
+        }
+    });
+    assert.equal(documentsThrowResult.success, false);
+    assert.equal(documentsThrowResult.errorCode, 'UXP_DOCUMENTS_UNAVAILABLE');
+    assert.equal(documentsThrowResult.error, 'InDesign UXP documents collection is unavailable');
+    assert.match(String(documentsThrowResult.documentsError), /documents getter exploded/);
+    assert.equal(openAttempted, false);
 
     const originalExecuteViaUXP = ScriptExecutor.executeViaUXP;
     try {
@@ -98,9 +119,43 @@ try {
         assert.equal(activeResult.ok, false);
         assert.equal(activeResult.activeDocumentPath, null);
         assert.equal(activeResult.workingCopyPath, expectedWorkingCopyPath);
+        assert.equal(activeResult.appAvailable, true);
+        assert.equal(activeResult.documentsAvailable, true);
+        assert.equal(activeResult.documentCount, 1);
+        assert.equal(activeResult.error, null);
         assert.ok(Array.isArray(activeResult.pathReadWarnings));
         assert.ok(activeResult.pathReadWarnings.some((warning) => warning.property === 'filePath'));
         assert.ok(activeResult.pathReadWarnings.some((warning) => warning.property === 'fullName'));
+
+        ScriptExecutor.executeViaUXP = async (code) => {
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+            const run = new AsyncFunction('app', code);
+            return await run(undefined);
+        };
+
+        const unavailableResult = await TemplateHandlers.rawValidateActive();
+        assert.equal(unavailableResult.ok, false);
+        assert.equal(unavailableResult.appAvailable, false);
+        assert.equal(unavailableResult.documentsAvailable, false);
+        assert.equal(unavailableResult.documentCount, null);
+        assert.equal(unavailableResult.error, 'InDesign UXP app object is unavailable');
+
+        ScriptExecutor.executeViaUXP = async (code) => {
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+            const run = new AsyncFunction('app', code);
+            return await run({
+                get documents() {
+                    throw new Error('documents getter exploded');
+                }
+            });
+        };
+
+        const documentsUnavailableResult = await TemplateHandlers.rawValidateActive();
+        assert.equal(documentsUnavailableResult.ok, false);
+        assert.equal(documentsUnavailableResult.appAvailable, true);
+        assert.equal(documentsUnavailableResult.documentsAvailable, false);
+        assert.equal(documentsUnavailableResult.documentCount, null);
+        assert.equal(documentsUnavailableResult.error, 'InDesign UXP documents collection is unavailable');
     } finally {
         ScriptExecutor.executeViaUXP = originalExecuteViaUXP;
     }

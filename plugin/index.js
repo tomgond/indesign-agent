@@ -1,4 +1,3 @@
-const { app } = require("indesign");
 const { entrypoints } = require("uxp");
 
 const statusEl = document.getElementById("status");
@@ -32,6 +31,68 @@ function serializeResult(value) {
   return String(value);
 }
 
+function resolveIndesignAppCandidate() {
+  let moduleApp;
+  try {
+    moduleApp = require("indesign").app;
+  } catch (error) {
+    moduleApp = undefined;
+  }
+
+  const globalApp = globalThis && typeof globalThis === "object" ? globalThis.app : undefined;
+  return moduleApp || globalApp;
+}
+
+function getDomDiagnostic(currentApp) {
+  const diagnostic = {
+    hasApp: !!currentApp,
+    hasDocuments: false,
+    documentCount: null,
+    hasOpen: false,
+    activeDocumentExists: false
+  };
+
+  if (!currentApp) return diagnostic;
+
+  diagnostic.hasOpen = typeof currentApp.open === "function";
+
+  try {
+    const documents = currentApp.documents;
+    diagnostic.hasDocuments = !!documents;
+    diagnostic.documentCount = documents ? Number(documents.length) || 0 : null;
+  } catch (error) {
+    diagnostic.documentCount = null;
+  }
+
+  try {
+    diagnostic.activeDocumentExists = !!currentApp.activeDocument;
+  } catch (error) {
+    diagnostic.activeDocumentExists = false;
+  }
+
+  return diagnostic;
+}
+
+function getIndesignApp() {
+  const currentApp = resolveIndesignAppCandidate();
+  if (!currentApp) {
+    throw new Error("InDesign UXP app object is unavailable");
+  }
+
+  let documents;
+  try {
+    documents = currentApp.documents;
+  } catch (error) {
+    throw new Error(`InDesign UXP documents collection is unavailable: ${error.message || String(error)}`);
+  }
+
+  if (!documents) {
+    throw new Error("InDesign UXP documents collection is unavailable");
+  }
+
+  return currentApp;
+}
+
 // Whitelist: only 'indesign' and 'uxp' modules are allowed inside execute calls.
 // Passing raw require into new Function() would otherwise expose the full module system.
 const ALLOWED_MODULES = new Set(['indesign', 'uxp']);
@@ -56,10 +117,11 @@ async function handleExecute(ws, msg) {
   const execStart = Date.now();
 
   try {
+    const currentApp = getIndesignApp();
     // Pass sandboxedRequire so code inside new Function() can call require('indesign') etc.
     // new Function() runs in global scope and loses UXP's module-scoped require.
     const fn = new Function('app', 'require', `return (async () => { ${msg.code} })()`);
-    const result = await fn(app, sandboxedRequire);
+    const result = await fn(currentApp, sandboxedRequire);
     const pluginExecutionMs = Date.now() - execStart;
 
     // Measure serialization time
@@ -142,10 +204,10 @@ entrypoints.setup({
     mainPanel: {
       show() {
         try {
-          const docCount = app.documents.length;
-          logEvent({ event: "dom_check", docCount, ok: true });
+          const currentApp = getIndesignApp();
+          logEvent({ event: "dom_check", ok: true, ...getDomDiagnostic(currentApp) });
         } catch (e) {
-          logEvent({ event: "dom_check", ok: false, error: String(e) });
+          logEvent({ event: "dom_check", ok: false, error: String(e), ...getDomDiagnostic(resolveIndesignAppCandidate()) });
         }
 
         try {
@@ -160,3 +222,10 @@ entrypoints.setup({
     }
   }
 });
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    getIndesignApp,
+    getDomDiagnostic
+  };
+}

@@ -238,6 +238,15 @@ export function buildEnsureTemplateReadyCode(expectedWorkingCopyPath, options = 
         const allowSwitchDocument = ${q(allowSwitchDocument)};
         const openIfMissing = ${q(openIfMissing)};
         const pathReadWarnings = [];
+        if (typeof app === 'undefined' || app == null) {
+            return {
+                success: false,
+                errorCode: 'UXP_APP_UNAVAILABLE',
+                error: 'InDesign UXP app object is unavailable',
+                workingCopyPath: expected,
+                pathReadWarnings
+            };
+        }
         function nativePath(v) { try { return v ? String(v.nativePath || v.fsName || v) : ''; } catch(e) { return ''; } }
         function joinDocPath(basePath, docName) { const base = String(basePath || '').replace(/[\\/]+$/, ''); if (!base) return ''; return base + '/' + docName; }
         function normalizeDocPath(rawPath, docName) { const base = nativePath(rawPath); const name = String(docName || ''); if (!base) return ''; if (name && !/\\.indd$/i.test(base)) return joinDocPath(base, name); return base; }
@@ -264,11 +273,8 @@ export function buildEnsureTemplateReadyCode(expectedWorkingCopyPath, options = 
             }
             return null;
         }
-        function documentsCollection() {
-            try { return app.documents || []; } catch (e) { return []; }
-        }
         function documentCount(coll) {
-            try { return Number(coll && coll.length) || 0; } catch (e) { return 0; }
+            return Number(coll && coll.length) || 0;
         }
         function documentAt(coll, index) {
             try { return coll.item ? coll.item(index) : coll[index]; } catch (e) { return null; }
@@ -286,8 +292,50 @@ export function buildEnsureTemplateReadyCode(expectedWorkingCopyPath, options = 
             } catch (e) {}
             try { app.activeDocument = doc; } catch (e) {}
         }
-        const documents = documentsCollection();
-        const count = documentCount(documents);
+        let documents = null;
+        try {
+            documents = app.documents;
+        } catch (e) {
+            return {
+                success: false,
+                errorCode: 'UXP_DOCUMENTS_UNAVAILABLE',
+                error: 'InDesign UXP documents collection is unavailable',
+                workingCopyPath: expected,
+                pathReadWarnings,
+                documentsError: String((e && e.message) || e)
+            };
+        }
+        if (!documents) {
+            return {
+                success: false,
+                errorCode: 'UXP_DOCUMENTS_UNAVAILABLE',
+                error: 'InDesign UXP documents collection is unavailable',
+                workingCopyPath: expected,
+                pathReadWarnings
+            };
+        }
+        if (openIfMissing && typeof app.open !== 'function') {
+            return {
+                success: false,
+                errorCode: 'UXP_OPEN_UNAVAILABLE',
+                error: 'InDesign UXP app.open is unavailable',
+                workingCopyPath: expected,
+                pathReadWarnings
+            };
+        }
+        let count = 0;
+        try {
+            count = documentCount(documents);
+        } catch (e) {
+            return {
+                success: false,
+                errorCode: 'UXP_DOCUMENTS_UNAVAILABLE',
+                error: 'InDesign UXP documents collection is unavailable',
+                workingCopyPath: expected,
+                pathReadWarnings,
+                documentsError: String((e && e.message) || e)
+            };
+        }
         let activeDocumentPath = null;
         let opened = false;
         let reusedOpenDocument = false;
@@ -543,28 +591,56 @@ export class TemplateHandlers {
             const expected = ${q(path.resolve(m.workingCopyPath))};
             let activeDocumentPath = null;
             const pathReadWarnings = [];
+            let appAvailable = false;
+            let documentsAvailable = false;
+            let documentCount = null;
+            let error = null;
             function nativePath(v) { try { return v ? String(v.nativePath || v.fsName || v) : ''; } catch(e) { return ''; } }
             function joinDocPath(basePath, docName) { const base = String(basePath || '').replace(/[\\/]+$/, ''); if (!base) return ''; return base + '/' + docName; }
             function normalizeDocPath(rawPath, docName) { const base = nativePath(rawPath); const name = String(docName || ''); if (!base) return ''; if (name && !/\.indd$/i.test(base)) return joinDocPath(base, name); return base; }
-            try {
-                const doc = app.documents.length ? app.activeDocument : null;
-                if (doc) {
-                    const docName = String(doc.name || '');
+            if (typeof app === 'undefined' || app == null) {
+                error = 'InDesign UXP app object is unavailable';
+            } else {
+                appAvailable = true;
+            }
+            if (!error) {
+                let documents = null;
+                try {
+                    documents = app.documents;
+                    documentsAvailable = !!documents;
+                } catch (e) {
+                    error = 'InDesign UXP documents collection is unavailable';
+                }
+                if (!error && !documents) {
+                    error = 'InDesign UXP documents collection is unavailable';
+                }
+                if (!error) {
                     try {
-                        activeDocumentPath = normalizeDocPath(await doc.filePath, doc.name) || null;
+                        documentCount = Number(documents.length) || 0;
                     } catch (e) {
-                        pathReadWarnings.push({ context: 'activeDocument', name: docName, property: 'filePath', error: String((e && e.message) || e) });
+                        error = 'InDesign UXP documents collection is unavailable';
                     }
-                    if (!activeDocumentPath) {
+                }
+                if (!error) {
+                    const doc = documentCount ? app.activeDocument : null;
+                    if (doc) {
+                        const docName = String(doc.name || '');
                         try {
-                            activeDocumentPath = normalizeDocPath(await doc.fullName, doc.name) || null;
+                            activeDocumentPath = normalizeDocPath(await doc.filePath, doc.name) || null;
                         } catch (e) {
-                            pathReadWarnings.push({ context: 'activeDocument', name: docName, property: 'fullName', error: String((e && e.message) || e) });
+                            pathReadWarnings.push({ context: 'activeDocument', name: docName, property: 'filePath', error: String((e && e.message) || e) });
+                        }
+                        if (!activeDocumentPath) {
+                            try {
+                                activeDocumentPath = normalizeDocPath(await doc.fullName, doc.name) || null;
+                            } catch (e) {
+                                pathReadWarnings.push({ context: 'activeDocument', name: docName, property: 'fullName', error: String((e && e.message) || e) });
+                            }
                         }
                     }
                 }
-            } catch(e) {}
-            return { ok: activeDocumentPath === expected, activeDocumentPath, workingCopyPath: expected, pathReadWarnings };
+            }
+            return { ok: !error && activeDocumentPath === expected, activeDocumentPath, workingCopyPath: expected, appAvailable, documentsAvailable, documentCount, error, pathReadWarnings };
         `, { ...meta, phase: 'rawValidateActive' });
     }
 

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import vm from 'node:vm';
 
 import { initWorkspace, clearActiveWorkspace } from '../src/core/workspaceState.js';
 
@@ -142,11 +143,52 @@ async function runGateTests() {
 }
 
 async function runPluginSourceTest() {
+    await test('Plugin resolves InDesign app at execution time', async () => {
+        const pluginSource = fs.readFileSync(path.join(process.cwd(), 'plugin/index.js'), 'utf8');
+        const module = { exports: {} };
+        const context = {
+            module,
+            exports: module.exports,
+            require: (name) => {
+                if (name === 'indesign') return { app: undefined };
+                if (name === 'uxp') return { entrypoints: { setup() {} } };
+                throw new Error(`Unexpected require: ${name}`);
+            },
+            document: { getElementById() { return { textContent: '' }; } },
+            console: { log() {} },
+            Blob: class Blob {
+                constructor(parts) {
+                    this.size = parts.join('').length;
+                }
+            },
+            WebSocket: function MockWebSocket() {},
+            globalThis: { app: { documents: { length: 1 }, open() {}, activeDocument: { id: 1 } } },
+            setTimeout() {}
+        };
+
+        vm.runInNewContext(pluginSource, context, { filename: 'plugin/index.js' });
+        const { getIndesignApp, getDomDiagnostic } = module.exports;
+
+        assert.equal(typeof getIndesignApp, 'function');
+        assert.equal(typeof getDomDiagnostic, 'function');
+        assert.equal(getIndesignApp(), context.globalThis.app);
+        assert.deepEqual(JSON.parse(JSON.stringify(getDomDiagnostic(context.globalThis.app))), {
+            hasApp: true,
+            hasDocuments: true,
+            documentCount: 1,
+            hasOpen: true,
+            activeDocumentExists: true
+        });
+        context.globalThis.app = undefined;
+        assert.throws(() => getIndesignApp(), /InDesign UXP app object is unavailable/);
+    });
+
     await test('Plugin no longer has synthetic timeout path', async () => {
         const pluginSource = fs.readFileSync(path.join(process.cwd(), 'plugin/index.js'), 'utf8');
         assert.ok(!/PLUGIN_TIMEOUT_MS/.test(pluginSource));
         assert.ok(!/Promise\.race\s*\(/.test(pluginSource));
-        assert.match(pluginSource, /const result = await fn\(app, sandboxedRequire\);/);
+        assert.match(pluginSource, /const currentApp = getIndesignApp\(\);/);
+        assert.match(pluginSource, /const result = await fn\(currentApp, sandboxedRequire\);/);
     });
 }
 
