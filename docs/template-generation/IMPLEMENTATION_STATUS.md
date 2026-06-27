@@ -25,7 +25,7 @@ These pieces are complete enough for Node-side use and have local checks:
 - Workspace-active guard for risky open/save/export/package paths covered in the local pass.
 - `return_preview_as_image` for an existing workspace PNG/JPG file.
 - Visual-review JSONL append/list and derivative status updates in manifest.
-- Fast Node tests for HTTP transport and workspace safety.
+- Fast Node tests for HTTP transport, workspace safety, bridge timeout dirty-state, UXP busy-gate, and inspection bounds.
 - Live MVP test scaffold that fails clearly without Mac/InDesign/bridge/plugin.
 
 See `complete/README.md` for the same complete list in a folder marker.

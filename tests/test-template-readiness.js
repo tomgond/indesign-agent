@@ -5,6 +5,8 @@ import path from 'node:path';
 
 import { initWorkspace, clearActiveWorkspace } from '../src/core/workspaceState.js';
 import { buildEnsureTemplateReadyCode } from '../src/handlers/templateHandlers.js';
+import { TemplateHandlers } from '../src/handlers/templateHandlers.js';
+import { ScriptExecutor } from '../src/core/scriptExecutor.js';
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
@@ -70,6 +72,38 @@ try {
     assert.ok(Array.isArray(result.pathReadWarnings));
     assert.ok(result.pathReadWarnings.some((warning) => warning.property === 'filePath' && warning.name === 'Unsaved.indd'));
     assert.ok(result.pathReadWarnings.some((warning) => warning.property === 'fullName' && warning.name === 'Unsaved.indd'));
+
+    const originalExecuteViaUXP = ScriptExecutor.executeViaUXP;
+    try {
+        const badDoc = {
+            name: 'BrokenActive.indd',
+            get filePath() {
+                throw new Error('Broken active document has no path');
+            },
+            get fullName() {
+                throw new Error('Broken active document has no path');
+            }
+        };
+
+        ScriptExecutor.executeViaUXP = async (code) => {
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+            const run = new AsyncFunction('app', code);
+            return await run({
+                documents: [badDoc],
+                activeDocument: badDoc
+            });
+        };
+
+        const activeResult = await TemplateHandlers.rawValidateActive();
+        assert.equal(activeResult.ok, false);
+        assert.equal(activeResult.activeDocumentPath, null);
+        assert.equal(activeResult.workingCopyPath, expectedWorkingCopyPath);
+        assert.ok(Array.isArray(activeResult.pathReadWarnings));
+        assert.ok(activeResult.pathReadWarnings.some((warning) => warning.property === 'filePath'));
+        assert.ok(activeResult.pathReadWarnings.some((warning) => warning.property === 'fullName'));
+    } finally {
+        ScriptExecutor.executeViaUXP = originalExecuteViaUXP;
+    }
 
     console.log('Template readiness tests passed');
 } finally {

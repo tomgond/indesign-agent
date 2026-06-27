@@ -80,23 +80,41 @@ function compileInspectionHelpers() {
     const inspectDocumentBundle = getTool('inspect_document_bundle');
     const inspectLayers = getTool('inspect_layers');
     const inspectParentPages = getTool('inspect_parent_pages');
+    const inspectLayoutGrid = getTool('inspect_layout_grid');
+    const analyzeDesignSystem = getTool('analyze_design_system');
     const oversetCheck = getTool('check_overset_text');
     const hiddenLockedCheck = getTool('check_hidden_or_locked_problem_items');
 
     assert.equal(inspectPageItems.inputSchema.properties.limit.default, 200);
+    assert.equal(inspectPageItems.inputSchema.properties.limit.maximum, 500);
     assert.equal(inspectPageItems.inputSchema.properties.offset.default, 0);
     assert.equal(inspectPageItems.inputSchema.properties.detailLevel.default, 'summary');
+    assert.deepEqual(inspectPageItems.inputSchema.properties.detailLevel.enum, ['summary', 'standard', 'deep']);
     assert.equal(inspectPageItems.inputSchema.properties.includeTextExcerpt.default, false);
     assert.equal(inspectPageItems.inputSchema.properties.includeImageMetadata.default, false);
     assert.equal(inspectPageItems.inputSchema.properties.includeTextMetadata.default, false);
     assert.equal(inspectPageItems.inputSchema.properties.includePathPoints.default, false);
+    assert.equal(inspectPageItems.inputSchema.properties.includeParentItems.default, false);
+    assert.equal(inspectPageItems.inputSchema.properties.allowHeavyInspection.default, false);
 
+    assert.equal(inspectDocumentBundle.inputSchema.properties.includePageItems.default, false);
+    assert.equal(inspectDocumentBundle.inputSchema.properties.includeParentPageItems.default, false);
+    assert.equal(inspectDocumentBundle.inputSchema.properties.allowHeavyInspection.default, false);
+    assert.equal(inspectDocumentBundle.inputSchema.properties.limit.maximum, 500);
     assert.equal(inspectDocumentBundle.inputSchema.properties.includeTextExcerpt.default, false);
     assert.equal(inspectLayers.inputSchema.properties.includeItemCounts.default, false);
     assert.equal(inspectParentPages.inputSchema.properties.includePageItems.default, false);
+    assert.equal(inspectParentPages.inputSchema.properties.allowHeavyInspection.default, false);
+    assert.equal(inspectParentPages.inputSchema.properties.limit.maximum, 500);
     assert.equal(oversetCheck.inputSchema.properties.includeTextExcerpt.default, false);
     assert.equal(oversetCheck.inputSchema.properties.allowHeavyInspection.default, false);
+    assert.equal(oversetCheck.inputSchema.properties.limit.maximum, 500);
     assert.equal(hiddenLockedCheck.inputSchema.properties.allowHeavyInspection.default, false);
+    assert.equal(hiddenLockedCheck.inputSchema.properties.limit.maximum, 500);
+    assert.equal(inspectLayoutGrid.inputSchema.properties.limit.default, 500);
+    assert.equal(inspectLayoutGrid.inputSchema.properties.limit.maximum, 500);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.limit.default, 500);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.limit.maximum, 500);
 }
 
 {
@@ -144,6 +162,9 @@ function compileInspectionHelpers() {
     assert.ok(boundedHelper.includes('hasMore'));
     assert.ok(boundedHelper.includes('itemMatchesCheapFilters'));
     assert.ok(!boundedHelper.includes('DEEP_FIELDS_OMITTED'));
+    assert.ok(boundedHelper.includes('const sliced = matched.slice'));
+    assert.ok(boundedHelper.includes('sliced.map'));
+    assert.ok(boundedHelper.indexOf('const sliced = matched.slice') < boundedHelper.indexOf('sliced.map'));
     assert.equal((source.match(/MASTER_PAGE_ITEMS_OMITTED/g) || []).length, 1);
 
     assert.ok(textHelper.includes('includeTextExcerpt === true'));
@@ -192,8 +213,10 @@ function compileInspectionHelpers() {
 
     assert.ok(linksBranch.includes('check:\'missing_links\''));
     assert.ok(!linksBranch.includes('inspectedItems'));
+    assert.ok(linksBranch.includes('doc.links'));
     assert.ok(fontsBranch.includes('check:\'missing_fonts\''));
     assert.ok(!fontsBranch.includes('inspectedItems'));
+    assert.ok(fontsBranch.includes('doc.fonts'));
 
     assert.ok(designSystemBranch.includes("includeTextMetadata: true"));
     assert.ok(designSystemBranch.includes("detailLevel: 'standard'"));
@@ -216,6 +239,11 @@ function compileInspectionHelpers() {
     assert.ok(bundleBranch.includes('includeSwatches !== false'));
     assert.ok(bundleBranch.includes('includeLayers !== false'));
     assert.ok(bundleBranch.includes('includeParents !== false'));
+}
+
+{
+    const runPreflightBranch = sliceBetween(source, 'function runPreflight(options){', 'if (${q(name)} === \'inspect_page_items_v2\')');
+    assert.ok(runPreflightBranch.includes('Heavy item checks were skipped; pass pageIndex, spreadIndex, or allowHeavyInspection=true to run overset and hidden/locked checks.'));
 }
 
 {

@@ -473,7 +473,8 @@ const derivativeToolDefinitions = [
         description: 'Heuristically derive grid, margin, and spacing candidates from page item bounds. Returns evidence and warnings.',
         inputSchema: schema({
             pageIndex: { type: 'integer', minimum: 0 },
-            includeHidden: { type: 'boolean' }
+            includeHidden: { type: 'boolean' },
+            limit: { type: 'integer', minimum: 1, maximum: 500, default: 500 }
         })
     },
     {
@@ -483,7 +484,8 @@ const derivativeToolDefinitions = [
             pageIndex: { type: 'integer', minimum: 0 },
             includeItems: { type: 'boolean' },
             includeMotifs: { type: 'boolean' },
-            includeGrid: { type: 'boolean' }
+            includeGrid: { type: 'boolean' },
+            limit: { type: 'integer', minimum: 1, maximum: 500, default: 500 }
         })
     },
     {

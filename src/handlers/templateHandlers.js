@@ -530,14 +530,29 @@ export class TemplateHandlers {
         return ScriptExecutor.executeViaUXP(`
             const expected = ${q(path.resolve(m.workingCopyPath))};
             let activeDocumentPath = null;
+            const pathReadWarnings = [];
             function nativePath(v) { try { return v ? String(v.nativePath || v.fsName || v) : ''; } catch(e) { return ''; } }
             function joinDocPath(basePath, docName) { const base = String(basePath || '').replace(/[\\/]+$/, ''); if (!base) return ''; return base + '/' + docName; }
             function normalizeDocPath(rawPath, docName) { const base = nativePath(rawPath); const name = String(docName || ''); if (!base) return ''; if (name && !/\.indd$/i.test(base)) return joinDocPath(base, name); return base; }
             try {
                 const doc = app.documents.length ? app.activeDocument : null;
-                activeDocumentPath = doc ? (normalizeDocPath(await doc.filePath, doc.name) || normalizeDocPath(await doc.fullName, doc.name) || null) : null;
+                if (doc) {
+                    const docName = String(doc.name || '');
+                    try {
+                        activeDocumentPath = normalizeDocPath(await doc.filePath, doc.name) || null;
+                    } catch (e) {
+                        pathReadWarnings.push({ context: 'activeDocument', name: docName, property: 'filePath', error: String((e && e.message) || e) });
+                    }
+                    if (!activeDocumentPath) {
+                        try {
+                            activeDocumentPath = normalizeDocPath(await doc.fullName, doc.name) || null;
+                        } catch (e) {
+                            pathReadWarnings.push({ context: 'activeDocument', name: docName, property: 'fullName', error: String((e && e.message) || e) });
+                        }
+                    }
+                }
             } catch(e) {}
-            return { ok: activeDocumentPath === expected, activeDocumentPath, workingCopyPath: expected };
+            return { ok: activeDocumentPath === expected, activeDocumentPath, workingCopyPath: expected, pathReadWarnings };
         `, { ...meta, phase: 'rawValidateActive' });
     }
 

@@ -30,7 +30,11 @@ function createDirtyTimeoutError(timeoutInfo, message) {
   return error;
 }
 
-function startBridgeServer() {
+function startBridgeServer(options = {}) {
+  const httpPort = options.httpPort ?? Number(process.env.INDESIGN_BRIDGE_HTTP_PORT || HTTP_PORT);
+  const wsPort = options.wsPort ?? Number(process.env.INDESIGN_BRIDGE_WS_PORT || WS_PORT);
+  const host = options.host || process.env.INDESIGN_BRIDGE_HOST || '127.0.0.1';
+  const timeoutMs = options.timeoutMs ?? Number(process.env.INDESIGN_BRIDGE_EXEC_TIMEOUT_MS || TIMEOUT_MS);
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
@@ -141,7 +145,7 @@ function startBridgeServer() {
       requestId,
       queueWaitMs,
       queueDepthAtEnqueue: item.queueDepthAtEnqueue,
-      timeoutMs: TIMEOUT_MS
+      timeoutMs
     });
 
     const timer = setTimeout(() => {
@@ -152,7 +156,7 @@ function startBridgeServer() {
         toolName: item.toolName || null,
         phase: item.phase || null,
         timedOutAt: new Date().toISOString(),
-        timeoutMs: TIMEOUT_MS
+        timeoutMs
       };
 
       pending.delete(requestId);
@@ -169,15 +173,15 @@ function startBridgeServer() {
         requestId,
         queueWaitMs,
         ageMs: age,
-        timeoutMs: TIMEOUT_MS,
+        timeoutMs,
         ok: false,
-        error: `Execution timed out after ${TIMEOUT_MS}ms`,
+        error: `Execution timed out after ${timeoutMs}ms`,
         timeoutInfo
       });
 
-      item.reject(new Error(`Execution timed out after ${TIMEOUT_MS}ms`));
+      item.reject(new Error(`Execution timed out after ${timeoutMs}ms`));
       flushQueuedRequestsAfterTimeout();
-    }, TIMEOUT_MS);
+    }, timeoutMs);
 
     pending.set(requestId, {
       resolve: (result) => {
@@ -273,7 +277,7 @@ function startBridgeServer() {
     });
   }
 
-  const wss = new WebSocketServer({ port: WS_PORT, host: '127.0.0.1' });
+  const wss = new WebSocketServer({ port: wsPort, host });
 
   wss.on('connection', (ws) => {
     console.log('[Bridge] Plugin connected');
@@ -426,7 +430,7 @@ function startBridgeServer() {
       possiblyBusyAfterTimeout,
       timedOutRequestCount: timedOutRequests.size,
       timeouts: {
-        bridgeExecutionMs: TIMEOUT_MS,
+        bridgeExecutionMs: timeoutMs,
       }
     });
   });
@@ -512,17 +516,34 @@ function startBridgeServer() {
     }
   });
 
-  const httpServer = app.listen(HTTP_PORT, '127.0.0.1', () => {
-    console.log(`[Bridge] HTTP server on http://127.0.0.1:${HTTP_PORT}`);
-    console.log(`[Bridge] WebSocket server on ws://127.0.0.1:${WS_PORT}`);
-    console.log(`[Bridge] Execution timeout: ${TIMEOUT_MS}ms`);
+  const httpServer = app.listen(httpPort, host, () => {
+    console.log(`[Bridge] HTTP server on http://${host}:${httpPort}`);
+    console.log(`[Bridge] WebSocket server on ws://${host}:${wsPort}`);
+    console.log(`[Bridge] Execution timeout: ${timeoutMs}ms`);
     console.log('[Bridge] Waiting for UXP plugin to connect...');
-    logEvent({ event: 'startup_listen', httpPort: HTTP_PORT, wsPort: WS_PORT, timeoutMs: TIMEOUT_MS, ok: true });
+    logEvent({ event: 'startup_listen', httpPort, wsPort, timeoutMs, ok: true });
   });
+
+  async function close() {
+    for (const client of wss.clients) {
+      try {
+        client.terminate();
+      } catch {}
+    }
+    await Promise.allSettled([
+      new Promise((resolve) => httpServer.close(resolve)),
+      new Promise((resolve) => wss.close(resolve)),
+    ]);
+  }
 
   return {
     httpServer,
-    wss
+    wss,
+    close,
+    httpPort,
+    wsPort,
+    host,
+    timeoutMs
   };
 }
 

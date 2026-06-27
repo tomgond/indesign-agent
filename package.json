@@ -9,7 +9,7 @@
     "dev": "node --inspect src/index.js",
     "build": "echo 'No build step required for Node.js'",
     "test": "npm run test:unit && node tests/test-all-handlers.js",
-    "test:unit": "node tests/test-template-active-guard.js && node tests/test-template-logs.js && node tests/test-template-readiness.js && node tests/test-template-unit.js"
+    "test:unit": "node tests/test-template-active-guard.js && node tests/test-template-logs.js && node tests/test-template-readiness.js && node tests/test-template-unit.js && node tests/test-bridge-timeout-dirty-state.js && node tests/test-uxp-busy-gate.js && node tests/test-template-inspection-bounds.js"
   },
   "keywords": [
     "mcp",
