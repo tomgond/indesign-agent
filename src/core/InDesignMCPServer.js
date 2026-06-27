@@ -25,6 +25,7 @@ import {
 import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
 import { getWorkspace, loadWorkspace } from './workspaceState.js';
 import { assertWorkspacePath } from '../utils/pathGuard.js';
+import { withUxpBusyGate } from './uxpBusyGate.js';
 
 const TEMPLATE_TOOL_NAMES = new Set(templateToolProfileNames);
 const TEMPLATE_BOOTSTRAP_TOOLS = new Set([
@@ -34,6 +35,27 @@ const TEMPLATE_BOOTSTRAP_TOOLS = new Set([
     'validate_workspace_path'
 ]);
 const TEMPLATE_WORKSPACE_ERROR = 'Template workspace is not attached. Call attach_template_workspace({ workspaceRoot }) or init_template_workspace(...) first.';
+const PURE_TEMPLATE_TOOL_NAMES = new Set([
+    'init_template_workspace',
+    'attach_template_workspace',
+    'copy_original_to_workspace',
+    'validate_workspace_path',
+    'list_versions',
+    'return_preview_as_image',
+    'record_visual_review',
+    'list_visual_reviews',
+    'mark_derivative_accepted',
+    'get_derivative_status',
+    'get_runtime_logs',
+    'get_debug_bundle',
+    'compare_derivative_state',
+]);
+const PURE_GENERIC_TOOL_NAMES = new Set([
+    'help',
+    'get_session_info',
+    'clear_session',
+    'capture_screen_preview',
+]);
 
 function activeToolProfile() {
     return process.env.INDESIGN_TOOL_PROFILE || 'template';
@@ -68,14 +90,55 @@ export class InDesignMCPServer {
                 const result = await this.handleToolCall(name, args);
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             } catch (error) {
+                const gatePayload = this.formatGateErrorResponse(name, error);
+                if (gatePayload) {
+                    return { content: [{ type: 'text', text: JSON.stringify(gatePayload, null, 2) }] };
+                }
                 return { content: [{ type: 'text', text: `Error: ${error.message}` }] };
             }
         });
     }
 
     async handleToolCall(name, args) {
+        const needsUxpGate = this.shouldGateTool(name);
+        if (needsUxpGate) {
+            return await withUxpBusyGate({ toolName: name }, () => this.executeTool(name, args));
+        }
+        return await this.executeTool(name, args);
+    }
+
+    shouldGateTool(name) {
         if (activeToolProfile() !== 'generic' && TEMPLATE_TOOL_NAMES.has(name)) {
-            if (!TEMPLATE_BOOTSTRAP_TOOLS.has(name) && !this.canLoadTemplateWorkspace()) {
+            return !PURE_TEMPLATE_TOOL_NAMES.has(name);
+        }
+
+        if (activeToolProfile() === 'generic') {
+            return !PURE_GENERIC_TOOL_NAMES.has(name);
+        }
+
+        return false;
+    }
+
+    formatGateErrorResponse(name, error) {
+        if (error && (error.code === 'INDESIGN_BUSY' || error.code === 'INDESIGN_BRIDGE_DIRTY')) {
+            return {
+                success: false,
+                operation: name,
+                error: error.message,
+                code: error.code,
+                busy: true,
+                ...(error.active ? { active: error.active } : {}),
+                ...(error.dirtyAfterTimeout ? { dirtyAfterTimeout: error.dirtyAfterTimeout } : {}),
+                timestamp: new Date().toISOString()
+            };
+        }
+        return null;
+    }
+
+    async executeTool(name, args) {
+        if (activeToolProfile() !== 'generic' && TEMPLATE_TOOL_NAMES.has(name)) {
+            const isPureTemplateTool = PURE_TEMPLATE_TOOL_NAMES.has(name);
+            if (!TEMPLATE_BOOTSTRAP_TOOLS.has(name) && !isPureTemplateTool && !this.canLoadTemplateWorkspace()) {
                 return formatErrorResponse(TEMPLATE_WORKSPACE_ERROR, name);
             }
             return await TemplateHandlers.handle(name, args);
