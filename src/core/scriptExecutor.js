@@ -11,7 +11,7 @@ export const BRIDGE_URL = process.env.BRIDGE_URL || 'http://127.0.0.1:3000';
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || null;
 
 // Timeout config — visible and env-overridable
-export const EXECUTE_TIMEOUT_MS = Number(process.env.INDESIGN_BRIDGE_FETCH_TIMEOUT_MS || 35000);
+export const EXECUTE_TIMEOUT_MS = Number(process.env.INDESIGN_BRIDGE_FETCH_TIMEOUT_MS || 65000);
 
 function bridgeHeaders() {
     const headers = { 'Content-Type': 'application/json' };
@@ -157,6 +157,12 @@ export class ScriptExecutor {
                 ok: false, error: bridgeError
             });
             // Classify bridge errors more precisely
+            if (response.status === 409 || data?.code === 'INDESIGN_BRIDGE_DIRTY') {
+                const error = new Error(bridgeError);
+                error.code = data?.code || 'INDESIGN_BRIDGE_DIRTY';
+                error.possiblyBusyAfterTimeout = data?.possiblyBusyAfterTimeout || null;
+                throw error;
+            }
             if (/timed out after/i.test(bridgeError)) {
                 throw new Error(`Bridge execution failed: ${bridgeError}`);
             }
@@ -205,6 +211,8 @@ export class ScriptExecutor {
                 queueDepth: data.queueDepth ?? null,
                 processingQueue: data.processingQueue ?? null,
                 activeRequest: data.activeRequest ?? null,
+                possiblyBusyAfterTimeout: data.possiblyBusyAfterTimeout ?? null,
+                timedOutRequestCount: data.timedOutRequestCount ?? 0,
                 timeouts: data.timeouts ?? null,
             };
         } catch (error) {

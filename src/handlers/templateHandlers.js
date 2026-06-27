@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { ScriptExecutor } from '../core/scriptExecutor.js';
+import { getUxpBusyGateStatus } from '../core/uxpBusyGate.js';
 import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
 import { initWorkspace, attachWorkspace, loadWorkspace, getWorkspace, saveWorkspace, nextVersionId, upsertDerivative, upsertDerivativePage, fileStatEvidence, validateWorkspaceFiles } from '../core/workspaceState.js';
 import { assertWorkspacePath, safeBasename } from '../utils/pathGuard.js';
@@ -504,7 +505,7 @@ export class TemplateHandlers {
             const folders = Object.fromEntries(['input','work','previews','exports','versions','logs','assets'].map((d) => [d, fs.existsSync(path.join(m.workspaceRoot, d))]));
             let active = null;
             try { active = await this.rawValidateActive(); } catch (e) { active = { ok: false, error: e.message }; }
-            return { workspaceRoot: m.workspaceRoot, workingCopyPath: m.workingCopyPath, folders, activeVersionId: m.activeVersionId, versionCount: m.versions.length, previewCount: m.previews.length, derivatives: m.derivatives, activeDocument: active };
+            return { workspaceRoot: m.workspaceRoot, workingCopyPath: m.workingCopyPath, folders, activeVersionId: m.activeVersionId, versionCount: m.versions.length, previewCount: m.previews.length, derivatives: m.derivatives, activeDocument: active, uxpExecution: getUxpBusyGateStatus() };
         })(), 'get_workspace_status');
     }
 
@@ -722,6 +723,7 @@ export class TemplateHandlers {
                 success: true,
                 workspaceStatus,
                 bridgeStatus,
+                uxpExecution: getUxpBusyGateStatus(),
                 runtimeLogs: args.includeLogs === false ? null : runtimeLogs,
                 bridgeLogs: args.includeLogs === false ? null : bridgeLogs,
                 visualReviews,
