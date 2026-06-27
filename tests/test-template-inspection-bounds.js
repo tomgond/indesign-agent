@@ -40,6 +40,7 @@ function compileInspectionHelpers() {
         'len',
         'arr',
         'at',
+        'idOf',
         'collectionIndexById',
         'readLabel',
         'labelMatches',
@@ -60,6 +61,7 @@ function compileInspectionHelpers() {
             return out;
         },
         (collection, index) => collection[index],
+        (item) => item?.id ?? null,
         (collection, obj) => {
             const id = obj && obj.id;
             if (id == null) return null;
@@ -142,7 +144,7 @@ function compileInspectionHelpers() {
     assert.ok(boundedHelper.includes('hasMore'));
     assert.ok(boundedHelper.includes('itemMatchesCheapFilters'));
     assert.ok(!boundedHelper.includes('DEEP_FIELDS_OMITTED'));
-    assert.equal((source.match(/PARENT_ITEMS_OMITTED/g) || []).length, 1);
+    assert.equal((source.match(/MASTER_PAGE_ITEMS_OMITTED/g) || []).length, 1);
 
     assert.ok(textHelper.includes('includeTextExcerpt === true'));
     assert.ok(textHelper.includes('includeTextMetadata === true'));
@@ -222,10 +224,15 @@ function compileInspectionHelpers() {
         id: 10,
         allPageItems: [
             { id: 1, name: 'top', constructor: { name: 'Rectangle' }, visible: true, itemLayer: { name: 'Layer A', visible: true }, parentPage: { id: 10 }, label: {} },
-            { id: 2, name: 'nested', constructor: { name: 'TextFrame' }, visible: true, itemLayer: { name: 'Layer A', visible: true }, parentPage: { id: 10 }, label: {} }
+            { id: 2, name: 'nested', constructor: { name: 'TextFrame' }, visible: true, itemLayer: { name: 'Layer A', visible: true }, parentPage: { id: 10 }, label: {} },
+            { id: 3, name: 'master-shared', constructor: { name: 'Rectangle' }, visible: true, itemLayer: { name: 'Layer A', visible: true }, parentPage: { id: 10 }, label: {} }
         ],
         pageItems: [
             { id: 1, name: 'top', constructor: { name: 'Rectangle' }, visible: true, itemLayer: { name: 'Layer A', visible: true }, parentPage: { id: 10 }, label: {} }
+        ],
+        masterPageItems: [
+            { id: 3, name: 'master-shared', constructor: { name: 'Rectangle' }, visible: true, itemLayer: { name: 'Layer A', visible: true }, parentPage: { id: 10 }, label: {} },
+            { id: 4, name: 'master-only', constructor: { name: 'Rectangle' }, visible: true, itemLayer: { name: 'Layer A', visible: true }, parentPage: { id: 10 }, label: {} }
         ]
     };
     const doc = {
@@ -246,8 +253,11 @@ function compileInspectionHelpers() {
     };
     const { getItemCandidates } = helpers(doc);
     const candidates = getItemCandidates({ pageIndex: 0, includeParentItems: false }, []);
-    assert.equal(candidates.length, 2);
+    assert.equal(candidates.length, 3);
     assert.equal(candidates.some((item) => item.id === 2), true);
+    const withParents = getItemCandidates({ pageIndex: 0, includeParentItems: true }, []);
+    assert.equal(withParents.some((item) => item.id === 4), true);
+    assert.equal(withParents.filter((item) => item.id === 3).length, 1);
 }
 
 {
@@ -284,6 +294,10 @@ function compileInspectionHelpers() {
     const hiddenIncluded = checkOversetText({ pageIndex: 0, includeHidden: true, includeTextExcerpt: true, limit: 10, offset: 0 });
     assert.equal(hiddenIncluded.issues.length, 2);
     assert.equal(Object.prototype.hasOwnProperty.call(hiddenIncluded.issues[1], 'textExcerpt'), true);
+    const emptyPage = checkOversetText({ pageIndex: 0, includeHidden: true, includeTextExcerpt: false, limit: 1, offset: 99 });
+    assert.equal(emptyPage.pagination.totalMatched, 2);
+    assert.equal(emptyPage.issues.length, 0);
+    assert.equal(emptyPage.ok, false);
 }
 
 {
@@ -317,6 +331,10 @@ function compileInspectionHelpers() {
     assert.equal(result.issues.length, 1);
     assert.equal(result.issues[0].objectName, 'beta-hidden');
     assert.equal(result.pagination.totalMatched, 1);
+    const emptyPage = checkHiddenOrLockedProblemItems({ pageIndex: 0, includeHidden: false, layerName: 'Visible Layer', limit: 1, offset: 99 });
+    assert.equal(emptyPage.pagination.totalMatched, 1);
+    assert.equal(emptyPage.issues.length, 0);
+    assert.equal(emptyPage.ok, false);
 }
 
 console.log('Template inspection bounds tests passed');
