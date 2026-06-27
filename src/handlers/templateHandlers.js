@@ -217,6 +217,113 @@ export function activeGuardCode(body) {
     `;
 }
 
+export function buildEnsureTemplateReadyCode(expectedWorkingCopyPath, options = {}) {
+    const { allowSwitchDocument = false, openIfMissing = true } = options;
+    const expected = path.resolve(expectedWorkingCopyPath);
+    return `
+        const expected = ${q(expected)};
+        const allowSwitchDocument = ${q(allowSwitchDocument)};
+        const openIfMissing = ${q(openIfMissing)};
+        const pathReadWarnings = [];
+        function nativePath(v) { try { return v ? String(v.nativePath || v.fsName || v) : ''; } catch(e) { return ''; } }
+        function joinDocPath(basePath, docName) { const base = String(basePath || '').replace(/[\\/]+$/, ''); if (!base) return ''; return base + '/' + docName; }
+        function normalizeDocPath(rawPath, docName) { const base = nativePath(rawPath); const name = String(docName || ''); if (!base) return ''; if (name && !/\\.indd$/i.test(base)) return joinDocPath(base, name); return base; }
+        function docName(doc) {
+            try {
+                return String((doc && doc.name) || '');
+            } catch (e) {
+                return '';
+            }
+        }
+        async function docPath(doc, context) {
+            const name = docName(doc);
+            try {
+                const byFilePath = normalizeDocPath(await doc.filePath, name);
+                if (byFilePath) return byFilePath;
+            } catch (e) {
+                pathReadWarnings.push({ context, name, property: 'filePath', error: String((e && e.message) || e) });
+            }
+            try {
+                const byFullName = normalizeDocPath(await doc.fullName, name);
+                if (byFullName) return byFullName;
+            } catch (e) {
+                pathReadWarnings.push({ context, name, property: 'fullName', error: String((e && e.message) || e) });
+            }
+            return null;
+        }
+        function documentsCollection() {
+            try { return app.documents || []; } catch (e) { return []; }
+        }
+        function documentCount(coll) {
+            try { return Number(coll && coll.length) || 0; } catch (e) { return 0; }
+        }
+        function documentAt(coll, index) {
+            try { return coll.item ? coll.item(index) : coll[index]; } catch (e) { return null; }
+        }
+        function currentActiveDocument(documents) {
+            try { return app.activeDocument || documentAt(documents, 0); } catch (e) { return documentAt(documents, 0); }
+        }
+        async function activateDocument(doc) {
+            if (!doc) return;
+            try {
+                if (typeof doc.activate === 'function') {
+                    await doc.activate();
+                    return;
+                }
+            } catch (e) {}
+            try { app.activeDocument = doc; } catch (e) {}
+        }
+        const documents = documentsCollection();
+        const count = documentCount(documents);
+        let activeDocumentPath = null;
+        let opened = false;
+        let reusedOpenDocument = false;
+        let switchedActiveDocument = false;
+        let workingDoc = null;
+        for (let i = 0; i < count; i++) {
+            const candidate = documentAt(documents, i);
+            const candidatePath = await docPath(candidate, 'documents[' + i + ']');
+            if (candidatePath === expected) {
+                workingDoc = candidate;
+                break;
+            }
+        }
+        const active = count ? currentActiveDocument(documents) : null;
+        activeDocumentPath = active ? await docPath(active, 'activeDocument') : null;
+        if (!count) {
+            if (!openIfMissing) return { success: false, error: 'No document open and openIfMissing=false', workingCopyPath: expected, pathReadWarnings };
+            workingDoc = await app.open(expected);
+            opened = true;
+        } else if (activeDocumentPath === expected) {
+            workingDoc = active;
+            reusedOpenDocument = true;
+        } else if (workingDoc) {
+            await activateDocument(workingDoc);
+            switchedActiveDocument = true;
+            reusedOpenDocument = true;
+        } else if (allowSwitchDocument && openIfMissing) {
+            workingDoc = await app.open(expected);
+            opened = true;
+        } else {
+            return { success: false, error: 'Active document is not workspace working copy', activeDocumentPath, workingCopyPath: expected, pathReadWarnings };
+        }
+        let currentActive = null;
+        try { currentActive = app.activeDocument; } catch (e) { currentActive = null; }
+        if (workingDoc && currentActive !== workingDoc) await activateDocument(workingDoc);
+        try { currentActive = app.activeDocument; } catch (e) { currentActive = null; }
+        const finalActiveDocumentPath = currentActive ? await docPath(currentActive, 'finalActiveDocument') : null;
+        return {
+            success: true,
+            workingCopyPath: expected,
+            activeDocumentPath: finalActiveDocumentPath,
+            opened,
+            reusedOpenDocument,
+            switchedActiveDocument,
+            pathReadWarnings
+        };
+    `;
+}
+
 async function runGuarded(body, options = {}) {
     const { trace, ...rest } = options;
     const execMeta = trace ? { traceId: trace.traceId, toolName: trace.toolName, phase: rest.phase || trace.phase } : {};
@@ -308,51 +415,7 @@ export class TemplateHandlers {
             throw new Error(workspaceAttachError());
         }
         assertWorkspacePath(manifest.workingCopyPath, { kind: 'work', manifest });
-        const result = await ScriptExecutor.executeViaUXP(`
-            const expected = ${q(path.resolve(manifest.workingCopyPath))};
-            const allowSwitchDocument = ${q(allowSwitchDocument)};
-            const openIfMissing = ${q(openIfMissing)};
-            function nativePath(v) { try { return v ? String(v.nativePath || v.fsName || v) : ''; } catch(e) { return ''; } }
-            function joinDocPath(basePath, docName) { const base = String(basePath || '').replace(/[\\/]+$/, ''); if (!base) return ''; return base + '/' + docName; }
-            function normalizeDocPath(rawPath, docName) { const base = nativePath(rawPath); const name = String(docName || ''); if (!base) return ''; if (name && !/\.indd$/i.test(base)) return joinDocPath(base, name); return base; }
-            async function docPath(doc) { return normalizeDocPath(await doc.filePath, doc.name) || normalizeDocPath(await doc.fullName, doc.name) || null; }
-            let activeDocumentPath = null;
-            let opened = false;
-            let reusedOpenDocument = false;
-            let switchedActiveDocument = false;
-            let workingDoc = null;
-            for (let i = 0; i < app.documents.length; i++) {
-                const candidate = app.documents.item ? app.documents.item(i) : app.documents[i];
-                const candidatePath = await docPath(candidate);
-                if (candidatePath === expected) {
-                    workingDoc = candidate;
-                    break;
-                }
-            }
-            if (app.documents.length === 0) {
-                if (!openIfMissing) return { success: false, error: 'No document open and openIfMissing=false', workingCopyPath: expected };
-                workingDoc = await app.open(expected);
-                opened = true;
-            } else {
-                const active = app.activeDocument || (app.documents.item ? app.documents.item(0) : app.documents[0]);
-                activeDocumentPath = active ? await docPath(active) : null;
-                if (activeDocumentPath === expected) {
-                    workingDoc = active;
-                    reusedOpenDocument = true;
-                } else if (workingDoc) {
-                    app.activeDocument = workingDoc;
-                    switchedActiveDocument = true;
-                    reusedOpenDocument = true;
-                } else if (allowSwitchDocument && openIfMissing) {
-                    workingDoc = await app.open(expected);
-                    opened = true;
-                } else {
-                    return { success: false, error: 'Active document is not workspace working copy', activeDocumentPath, workingCopyPath: expected };
-                }
-            }
-            if (workingDoc && app.activeDocument !== workingDoc) app.activeDocument = workingDoc;
-            return { success: true, workingCopyPath: expected, activeDocumentPath: await docPath(app.activeDocument), opened, reusedOpenDocument, switchedActiveDocument };
-        `, execMeta);
+        const result = await ScriptExecutor.executeViaUXP(buildEnsureTemplateReadyCode(manifest.workingCopyPath, { allowSwitchDocument, openIfMissing }), execMeta);
         if (result?.success === false) throw new Error(result.error || 'Template readiness failed');
         return result;
     }
@@ -472,7 +535,7 @@ export class TemplateHandlers {
     static open_working_copy() {
         return response((async () => {
             const ready = await this.ensureTemplateReady({ allowSwitchDocument: true, openIfMissing: true });
-            return {
+            const result = {
                 success: true,
                 documentName: path.basename(ready.workingCopyPath),
                 path: ready.workingCopyPath,
@@ -480,6 +543,8 @@ export class TemplateHandlers {
                 opened: ready.opened,
                 switchedActiveDocument: ready.switchedActiveDocument
             };
+            if (ready.pathReadWarnings?.length) result.pathReadWarnings = ready.pathReadWarnings;
+            return result;
         })(), 'open_working_copy');
     }
 
