@@ -85,7 +85,6 @@ async function handleExecute(ws, msg) {
       ok: true,
     });
   } catch (e) {
-    clearTimeout(timerId);
     const pluginExecutionMs = Date.now() - execStart;
     const errorMsg = e.message || String(e);
 
