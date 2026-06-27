@@ -15,8 +15,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ScriptExecutor } from '../core/scriptExecutor.js';
 import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
+import { buildMcpImagePayload } from '../utils/mcpImage.js';
 import { PageHandlers } from './pageHandlers.js';
 import { DocumentHandlers } from './documentHandlers.js';
+import { imageInfo } from '../utils/imageInfo.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -291,14 +293,27 @@ $bmp.Dispose();
                 );
             }
 
-            return formatResponse({
+            const info = imageInfo(normalizedPath);
+            const result = {
                 success: true,
                 filePath: normalizedPath,
+                path: normalizedPath,
                 sizeBytes: stat.size,
+                widthPx: info.widthPx,
+                heightPx: info.heightPx,
+                mimeType: info.mimeType,
+                format: info.mimeType === 'image/jpeg' ? 'jpg' : 'png',
                 kind: 'screen_capture',
                 note: 'OS-level screenshot; not an InDesign export',
                 platform,
                 capturedAt: new Date().toISOString(),
+            };
+            if (args.returnImage !== false) {
+                result.mcpImage = buildMcpImagePayload(normalizedPath, info.mimeType);
+            }
+
+            return formatResponse({
+                ...result,
             }, operation);
         } catch (err) {
             return formatErrorResponse(err.message, operation);
@@ -372,6 +387,7 @@ $bmp.Dispose();
                 outputPath,
                 delayMs: 0,
                 captureMode: 'screen',
+                returnImage: args.returnImage !== false,
             });
         } catch (err) {
             return formatErrorResponse(err.message, operation);

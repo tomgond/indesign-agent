@@ -58,6 +58,36 @@ const PURE_GENERIC_TOOL_NAMES = new Set([
     'capture_screen_preview',
 ]);
 
+export function formatMcpContent(result) {
+    const image = result?.result?.mcpImage || result?.mcpImage;
+
+    if (!image?.data || !image?.mimeType) {
+        return [{ type: 'text', text: JSON.stringify(result ?? null, null, 2) }];
+    }
+
+    const cleaned = {
+        ...result,
+        result: result?.result && typeof result.result === 'object'
+            ? { ...result.result }
+            : result?.result
+    };
+
+    if (cleaned.result?.mcpImage) delete cleaned.result.mcpImage;
+    if (cleaned.mcpImage) delete cleaned.mcpImage;
+
+    return [
+        {
+            type: 'image',
+            data: image.data,
+            mimeType: image.mimeType,
+        },
+        {
+            type: 'text',
+            text: JSON.stringify(cleaned, null, 2),
+        },
+    ];
+}
+
 function activeToolProfile() {
     return process.env.INDESIGN_TOOL_PROFILE || 'template';
 }
@@ -89,7 +119,7 @@ export class InDesignMCPServer {
 
             try {
                 const result = await this.handleToolCall(name, args);
-                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+                return { content: formatMcpContent(result) };
             } catch (error) {
                 const gatePayload = this.formatGateErrorResponse(name, error);
                 if (gatePayload) {

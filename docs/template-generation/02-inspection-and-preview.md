@@ -298,13 +298,14 @@ Terminology may vary across InDesign versions (`masterSpreads` vs parent pages).
 1. Validate active document is the working copy.
 2. Validate `pageIndex` exists.
 3. Sanitize `outputName` to a basename; reject path separators.
-4. Build output path under `workspaceRoot/previews`.
-5. Reject overwrite unless `overwrite: true`.
-6. Configure InDesign export preferences for page range, format, resolution, bleed, and transparency if available.
-7. Export to the preview path.
-8. Read image dimensions/mime type with `imageInfo.js`.
-9. Record preview metadata in `manifest.json`.
-10. Return preview record.
+4. Normalize `outputName`: append `.<format>` when missing and reject mismatched extensions.
+5. Build output path under `workspaceRoot/previews`.
+6. Reject overwrite unless `overwrite: true`.
+7. Configure InDesign export preferences for page range, format, resolution, bleed, and transparency if available.
+8. Export to the preview path.
+9. Read image dimensions/mime type with `imageInfo.js`.
+10. Record preview metadata in `manifest.previews[]`.
+11. Return preview record and, by default, an MCP image response item.
 
 Preview record:
 
@@ -312,10 +313,16 @@ Preview record:
 {
   "previewId": "preview_20260619T120000Z_page_0",
   "path": "/workspace/previews/speaker_post.png",
+  "filePath": "/workspace/previews/speaker_post.png",
+  "format": "png",
   "mimeType": "image/png",
   "widthPx": 1080,
   "heightPx": 1080,
+  "sizeBytes": 12345,
   "pageIndex": 0,
+  "pageId": 42,
+  "spreadIndex": null,
+  "derivativeId": null,
   "createdAt": "2026-06-19T12:00:00.000Z"
 }
 ```
@@ -335,19 +342,20 @@ Same as `export_page_preview`, but accepts `spreadIndex` and exports the spread 
 1. If `previewId`, load preview record from manifest.
 2. If `path`, validate it is under `workspaceRoot/previews`.
 3. Read the file from disk in Node.
-4. Return base64 data and metadata:
+4. Return an MCP image by default, with metadata and optional legacy base64 only when explicitly requested:
 
 ```json
 {
   "previewId": "preview_...",
+  "path": "/workspace/previews/speaker_post.png",
+  "filePath": "/workspace/previews/speaker_post.png",
+  "format": "png",
   "mimeType": "image/png",
   "widthPx": 1080,
   "heightPx": 1080,
-  "dataBase64": "..."
+  "sizeBytes": 12345
 }
 ```
-
-Base64 is acceptable for MVP. A future MCP resource-returning implementation can replace this without changing the preview export contract.
 
 ## Tests for this feature
 
@@ -357,9 +365,10 @@ Base64 is acceptable for MVP. A future MCP resource-returning implementation can
 - Parent items are excluded by default and included when requested.
 - Preview exports only to `workspaceRoot/previews`.
 - Preview export rejects path separators and `../` in `outputName`.
+- Preview export appends the requested extension when `outputName` is missing one and rejects mismatched extensions.
 - Preview export refuses overwrite unless requested.
-- `return_preview_as_image` rejects paths outside previews.
-- Returned base64 decodes to the preview file bytes.
+- `return_preview_as_image` rejects paths outside previews and returns an MCP image response by default.
+- `manifest.previews[]` is the canonical preview registry for lookup.
 
 ## Acceptance criteria
 

@@ -108,8 +108,8 @@ For agent visual loops, **use `capture_indesign_screen_preview`** instead of exp
 5. Inspect actual InDesign objects using `get_page_content_summary` / `list_page_items` before changing geometry.
 
 **Available tools:**
-- `capture_screen_preview` — Raw OS-level screenshot (PNG). No InDesign interaction.
-- `capture_indesign_screen_preview` — Navigate InDesign to a page, optionally zoom, then capture.
+- `capture_screen_preview` — Raw OS-level screenshot (PNG). No InDesign interaction. Returns an MCP image by default.
+- `capture_indesign_screen_preview` — Navigate InDesign to a page, optionally zoom, then capture. Returns an MCP image by default.
 
 **`capture_indesign_screen_preview` zoomMode:**
 - `fit_page`: navigate to the page and apply the repo's existing page-fit zoom behavior.

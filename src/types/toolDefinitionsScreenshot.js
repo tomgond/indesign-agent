@@ -31,6 +31,11 @@ export const screenshotToolDefinitions = [
                     default: 'screen',
                     description: 'Currently only full-screen capture is supported.',
                 },
+                returnImage: {
+                    type: 'boolean',
+                    default: true,
+                    description: 'Return the screenshot as an MCP image response item. Set false to return metadata only.',
+                },
             },
             required: ['outputPath'],
         },
@@ -62,6 +67,11 @@ export const screenshotToolDefinitions = [
                     minimum: 0,
                     maximum: 5000,
                     description: 'Delay in ms after navigation/zoom before screenshot.',
+                },
+                returnImage: {
+                    type: 'boolean',
+                    default: true,
+                    description: 'Return the screenshot as an MCP image response item. Set false to return metadata only.',
                 },
             },
             required: ['outputPath', 'pageIndex'],

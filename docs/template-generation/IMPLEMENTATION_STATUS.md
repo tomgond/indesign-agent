@@ -23,7 +23,8 @@ These pieces are complete enough for Node-side use and have local checks:
 - Version copy/list/rollback at the filesystem level.
 - Default denial of public `execute_indesign_code` unless `ALLOW_EXECUTE_INDESIGN_CODE=true`.
 - Workspace-active guard for risky open/save/export/package paths covered in the local pass.
-- `return_preview_as_image` for an existing workspace PNG/JPG file.
+- `return_preview_as_image` for an existing workspace PNG/JPG file, with MCP image output by default.
+- `capture_screen_preview`, `capture_indesign_screen_preview`, `export_page_preview`, `export_spread_preview`, and `export_derivative_preview` now return MCP images by default when the caller does not opt out.
 - Visual-review JSONL append/list and derivative status updates in manifest.
 - Fast Node tests for HTTP transport, workspace safety, bridge timeout dirty-state, UXP busy-gate, and inspection bounds.
 - Live MVP test scaffold that fails clearly without Mac/InDesign/bridge/plugin.

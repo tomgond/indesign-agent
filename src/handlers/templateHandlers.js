@@ -7,6 +7,7 @@ import { formatResponse, formatErrorResponse } from '../utils/stringUtils.js';
 import { initWorkspace, attachWorkspace, loadWorkspace, getWorkspace, saveWorkspace, nextVersionId, upsertDerivative, upsertDerivativePage, fileStatEvidence, validateWorkspaceFiles } from '../core/workspaceState.js';
 import { assertWorkspacePath, safeBasename } from '../utils/pathGuard.js';
 import { imageInfo } from '../utils/imageInfo.js';
+import { buildMcpImagePayload } from '../utils/mcpImage.js';
 import { appendRuntimeLog, readRuntimeLogs, resolveRuntimeLogPath } from '../core/runtimeLogger.js';
 import os from 'node:os';
 
@@ -115,6 +116,17 @@ function derivativePageSize(args = {}) {
     if (args.orientation === 'portrait' && widthPt > heightPt) [widthPt, heightPt] = [heightPt, widthPt];
     if (widthPt <= 0 || heightPt <= 0) throw new Error('page width and height must be positive');
     return { width: widthPt, height: heightPt, unit: 'pt', preset: args.pageSize || preset?.preset || 'custom' };
+}
+
+export function normalizePreviewOutputName(outputName, format, fallbackName) {
+    const ext = format === 'jpg' ? 'jpg' : 'png';
+    const raw = safeBasename(outputName || fallbackName);
+    const currentExt = path.extname(raw).toLowerCase();
+    if (!currentExt) return `${raw}.${ext}`;
+    if (currentExt !== `.${ext}`) {
+        throw new Error(`outputName extension ${currentExt} does not match format ${ext}`);
+    }
+    return raw;
 }
 
 function resolveWorkspaceImagePath(requestedPath, manifest = loadWorkspace()) {
@@ -629,11 +641,44 @@ export class TemplateHandlers {
     static return_preview_as_image(args = {}) {
         return response((async () => {
             const m = loadWorkspace();
-            const rec = args.previewId ? m.previews.find((p) => p.previewId === args.previewId) : { path: args.path };
-            if (!rec?.path) throw new Error('previewId or path is required');
+            let rec = null;
+            if (args.previewId) {
+                rec = (m.previews || []).find((p) => p.previewId === args.previewId) || null;
+                if (!rec) {
+                    throw new Error(`Unknown previewId: ${args.previewId}. Preview is not recorded in manifest.previews.`);
+                }
+            } else if (args.path) {
+                rec = { path: args.path };
+            } else {
+                throw new Error('previewId or path is required');
+            }
             const checked = assertWorkspacePath(rec.path, { kind: 'previews', manifest: m }).path;
+            let stat;
+            try {
+                stat = fileStatEvidence(checked);
+            } catch (error) {
+                const previewRef = rec.previewId ? `previewId ${rec.previewId}` : `path ${checked}`;
+                throw new Error(`Unable to read preview ${previewRef}: ${error.message}`);
+            }
             const info = imageInfo(checked);
-            return { ...rec, ...info, dataBase64: fs.readFileSync(checked).toString('base64') };
+            const result = {
+                ...rec,
+                path: checked,
+                filePath: checked,
+                mimeType: rec.mimeType || info.mimeType,
+                format: rec.format || (info.mimeType === 'image/jpeg' ? 'jpg' : 'png'),
+                widthPx: info.widthPx,
+                heightPx: info.heightPx,
+                sizeBytes: stat.sizeBytes,
+                createdAt: rec.createdAt || null
+            };
+            if (args.returnImage !== false) {
+                result.mcpImage = buildMcpImagePayload(checked, result.mimeType);
+            }
+            if (args.legacyDataBase64 === true) {
+                result.dataBase64 = fs.readFileSync(checked).toString('base64');
+            }
+            return result;
         })(), 'return_preview_as_image');
     }
 
@@ -1047,19 +1092,38 @@ export class TemplateHandlers {
             const ext = (args.format || 'png').toLowerCase() === 'jpg' ? 'jpg' : 'png';
             const derivativeId = args.derivativeId || this.resolveDerivativeRecord(manifest, { pageIndex: resolved.pageIndex }).derivativeId;
             const existing = (manifest.previews || []).filter((preview) => preview.derivativeId === derivativeId && preview.pageIndex === resolved.pageIndex);
-            const outputName = `${derivativeId}__${resolved.pageIndex}__preview_${String(existing.length + 1).padStart(3, '0')}.${ext}`;
-            const rec = await this.exportPreview('page', { ...args, derivativeId, pageIndex: resolved.pageIndex, format: ext, outputName, overwrite: args.overwrite });
+            const outputName = normalizePreviewOutputName(
+                args.outputName,
+                ext,
+                `${derivativeId}__${resolved.pageIndex}__preview_${String(existing.length + 1).padStart(3, '0')}`
+            );
+            const rec = unwrapToolResult(await this.exportPreview('page', { ...args, derivativeId, pageIndex: resolved.pageIndex, format: ext, outputName, overwrite: args.overwrite }));
             const previewId = `preview_${derivativeId}_${String(existing.length + 1).padStart(3, '0')}`;
-            const preview = { ...rec, previewId, derivativeId, pageId: resolved.pageId || null, mimeType: ext === 'jpg' ? 'image/jpeg' : 'image/png', createdAt: nowIso() };
+            const preview = {
+                ...rec,
+                success: true,
+                previewId,
+                derivativeId,
+                pageId: resolved.pageId || null,
+                spreadIndex: resolved.spreadIndex ?? null,
+                mimeType: rec.mimeType || (ext === 'jpg' ? 'image/jpeg' : 'image/png'),
+                format: ext,
+                createdAt: nowIso(),
+            };
             const fresh = loadWorkspace();
-            fresh.previews = (fresh.previews || []).filter((item) => item.previewId !== rec.previewId).concat(preview);
+            const persistedPreview = { ...preview };
+            delete persistedPreview.mcpImage;
+            fresh.previews = (fresh.previews || []).filter((item) => item.previewId !== rec.previewId).concat(persistedPreview);
+            const derivative = (fresh.derivatives || []).find((item) => item.derivativeId === derivativeId) || null;
+            if (!derivative) throw new Error(`Unknown derivativeId: ${derivativeId}`);
+            derivative.latestPreviewId = previewId;
+            derivative.previewIds = [...new Set([...(derivative.previewIds || []), previewId])];
+            derivative.updatedAt = nowIso();
             saveWorkspace(fresh);
-            const derivative = this.resolveDerivativeRecord(fresh, { derivativeId });
-            upsertDerivativePage(fresh, derivativeId, {
-                latestPreviewId: previewId,
-                previewIds: [...new Set([...(derivative.previewIds || []), previewId])]
-            });
-            return { success:true, previewId, derivativeId, pageIndex: resolved.pageIndex, pageId: resolved.pageId || null, path: preview.path, mimeType: preview.mimeType, widthPx: preview.widthPx, heightPx: preview.heightPx, sizeBytes: preview.sizeBytes, createdAt: preview.createdAt };
+            if (args.returnImage !== false) {
+                preview.mcpImage = buildMcpImagePayload(preview.path, preview.mimeType);
+            }
+            return preview;
         })(), 'export_derivative_preview');
     }
 
@@ -1643,7 +1707,7 @@ export class TemplateHandlers {
             const execMeta = args.trace ? { traceId: args.trace.traceId, toolName: args.trace.toolName, phase: `exportPreview_${kind}` } : {};
             await this.ensureTemplateReady({ allowSwitchDocument: true, openIfMissing: true, trace: args.trace });
             const ext = (args.format || 'png').toLowerCase() === 'jpg' ? 'jpg' : 'png';
-            const outputName = safeBasename(args.outputName || `${kind}_${args.pageIndex ?? args.spreadIndex}.${ext}`);
+            const outputName = normalizePreviewOutputName(args.outputName, ext, `${kind}_${args.pageIndex ?? args.spreadIndex}`);
             const out = assertWorkspacePath(path.join(m.workspaceRoot, 'previews', outputName), { kind: 'previews', manifest: m }).path;
             if (fs.existsSync(out) && !args.overwrite) throw new Error('Preview exists; set overwrite=true');
             const resolved = args.derivativeId ? unwrapToolResult(await this.resolve_derivative_page({ derivativeId: args.derivativeId })) : null;
@@ -1687,8 +1751,28 @@ export class TemplateHandlers {
             const stat = fileStatEvidence(out);
             const info = imageInfo(out);
             if (!info.widthPx || !info.heightPx) throw new Error('Preview exported but dimensions are invalid');
-            const rec = { previewId: `preview_${Date.now()}_${kind}_${pageIndex ?? args.spreadIndex ?? 0}`, path: out, ...info, sizeBytes: stat.sizeBytes, pageIndex, pageId: resolved?.pageId || null, spreadIndex: args.spreadIndex ?? null, createdAt: new Date().toISOString() };
-            m.previews.push(rec); saveWorkspace(m);
+            const rec = {
+                success: true,
+                previewId: `preview_${Date.now()}_${kind}_${pageIndex ?? args.spreadIndex ?? 0}`,
+                path: out,
+                filePath: out,
+                mimeType: info.mimeType,
+                format: ext,
+                widthPx: info.widthPx,
+                heightPx: info.heightPx,
+                sizeBytes: stat.sizeBytes,
+                pageIndex,
+                pageId: resolved?.pageId || null,
+                spreadIndex: args.spreadIndex ?? null,
+                derivativeId: args.derivativeId || null,
+                createdAt: new Date().toISOString(),
+            };
+            if (args.returnImage !== false) {
+                rec.mcpImage = buildMcpImagePayload(out, info.mimeType);
+            }
+            const persisted = { ...rec };
+            delete persisted.mcpImage;
+            m.previews.push(persisted); saveWorkspace(m);
             return rec;
         })(), `export_${kind}_preview`);
     }
