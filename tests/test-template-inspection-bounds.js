@@ -19,6 +19,60 @@ function sliceBetween(text, startMarker, endMarker) {
     return text.slice(start, end);
 }
 
+function labelMatch(label, query) {
+    const keys = Object.keys(query || {});
+    return keys.length > 0 && keys.every((key) => {
+        const expected = query[key];
+        const actual = label ? label[key] : undefined;
+        if (expected && typeof expected === 'object' && !Array.isArray(expected)) return labelMatch(actual || {}, expected);
+        return actual === expected;
+    });
+}
+
+function compileInspectionHelpers() {
+    const start = source.indexOf('function clampInt');
+    const end = source.indexOf('    `;', start);
+    assert.ok(start >= 0 && end > start, 'missing inspection helper block');
+    const helperCode = source.slice(start, end);
+    const factory = new Function(
+        'doc',
+        'safe',
+        'len',
+        'arr',
+        'at',
+        'collectionIndexById',
+        'readLabel',
+        'labelMatches',
+        `${helperCode}; return { getItemCandidates, itemMatchesCheapFilters, itemMatchesNonVisibilityFilters, checkOversetText, checkHiddenOrLockedProblemItems, inspectPageItemsBounded };`
+    );
+
+    return (doc) => factory(
+        doc,
+        (fn, fallback = null) => {
+            try { return fn(); } catch { return fallback; }
+        },
+        (value) => {
+            try { return value.length || 0; } catch { return 0; }
+        },
+        (collection, fn) => {
+            const out = [];
+            for (let i = 0; i < (collection ? collection.length || 0 : 0); i++) out.push(fn(collection[i], i));
+            return out;
+        },
+        (collection, index) => collection[index],
+        (collection, obj) => {
+            const id = obj && obj.id;
+            if (id == null) return null;
+            for (let i = 0; i < (collection ? collection.length || 0 : 0); i++) {
+                if (collection[i] && collection[i].id === id) return i;
+            }
+            return null;
+        },
+        (item) => item?.label || {},
+        labelMatch
+    );
+}
+
 {
     const inspectPageItems = getTool('inspect_page_items_v2');
     const inspectDocumentBundle = getTool('inspect_document_bundle');
@@ -54,6 +108,11 @@ function sliceBetween(text, startMarker, endMarker) {
         'function inspectPageItemsBounded(options){',
         'function getItemCandidates(options, warnings){'
     );
+    const candidateHelper = sliceBetween(
+        source,
+        'function getItemCandidates(options, warnings){',
+        'function inspectStyles(){'
+    );
     const textHelper = sliceBetween(
         source,
         'function textInfoForItem(it, options){',
@@ -73,6 +132,8 @@ function sliceBetween(text, startMarker, endMarker) {
     assert.ok(pageItemsBranch.includes('inspectPageItemsBounded(args)'));
     assert.ok(!pageItemsBranch.includes('arr(itemSource(), args.detailLevel === \'summary\' ? itemInfoSummary : itemInfoForDetailLevel)'));
     assert.ok(!pageItemsBranch.includes('visibleItems = inspectedItems.filter'));
+    assert.ok(candidateHelper.includes('page.allPageItems || page.pageItems'));
+    assert.ok(!candidateHelper.includes('page.pageItems || page.allPageItems'));
 
     assert.ok(boundedHelper.includes('limit'));
     assert.ok(boundedHelper.includes('offset'));
@@ -80,6 +141,9 @@ function sliceBetween(text, startMarker, endMarker) {
     assert.ok(boundedHelper.includes('totalMatched'));
     assert.ok(boundedHelper.includes('hasMore'));
     assert.ok(boundedHelper.includes('itemMatchesCheapFilters'));
+    assert.ok(!boundedHelper.includes('DEEP_FIELDS_OMITTED'));
+    assert.equal((source.match(/PARENT_ITEMS_OMITTED/g) || []).length, 1);
+
     assert.ok(textHelper.includes('includeTextExcerpt === true'));
     assert.ok(textHelper.includes('includeTextMetadata === true'));
     assert.ok(textHelper.includes('it.contents'));
@@ -101,6 +165,7 @@ function sliceBetween(text, startMarker, endMarker) {
     const parentInfoHelper = sliceBetween(source, 'function parentPageInfo(m,i, options){', 'function itemTypeName(it){');
     const linksBranch = sliceBetween(source, 'function checkMissingLinks(){', 'function checkMissingFonts(){');
     const fontsBranch = sliceBetween(source, 'function checkMissingFonts(){', 'function checkOversetText(options){');
+    const designSystemBranch = sliceBetween(source, 'static analyze_design_system(args = {}) {', 'static compare_derivative_state(args = {}) {');
 
     assert.ok(!stylesBranch.includes('doc.allPageItems'));
     assert.ok(!stylesBranch.includes('doc.pages'));
@@ -127,6 +192,12 @@ function sliceBetween(text, startMarker, endMarker) {
     assert.ok(!linksBranch.includes('inspectedItems'));
     assert.ok(fontsBranch.includes('check:\'missing_fonts\''));
     assert.ok(!fontsBranch.includes('inspectedItems'));
+
+    assert.ok(designSystemBranch.includes("includeTextMetadata: true"));
+    assert.ok(designSystemBranch.includes("detailLevel: 'standard'"));
+    assert.ok(designSystemBranch.includes('includeTextExcerpt: false'));
+    assert.ok(designSystemBranch.includes('includeImageMetadata: false'));
+    assert.ok(designSystemBranch.includes('includePathPoints: false'));
 }
 
 {
@@ -143,6 +214,109 @@ function sliceBetween(text, startMarker, endMarker) {
     assert.ok(bundleBranch.includes('includeSwatches !== false'));
     assert.ok(bundleBranch.includes('includeLayers !== false'));
     assert.ok(bundleBranch.includes('includeParents !== false'));
+}
+
+{
+    const helpers = compileInspectionHelpers();
+    const page = {
+        id: 10,
+        allPageItems: [
+            { id: 1, name: 'top', constructor: { name: 'Rectangle' }, visible: true, itemLayer: { name: 'Layer A', visible: true }, parentPage: { id: 10 }, label: {} },
+            { id: 2, name: 'nested', constructor: { name: 'TextFrame' }, visible: true, itemLayer: { name: 'Layer A', visible: true }, parentPage: { id: 10 }, label: {} }
+        ],
+        pageItems: [
+            { id: 1, name: 'top', constructor: { name: 'Rectangle' }, visible: true, itemLayer: { name: 'Layer A', visible: true }, parentPage: { id: 10 }, label: {} }
+        ]
+    };
+    const doc = {
+        pages: [page],
+        spreads: [{ id: 20, allPageItems: [], pageItems: [] }],
+        links: [],
+        fonts: [],
+        layers: [],
+        swatches: [],
+        paragraphStyles: [],
+        characterStyles: [],
+        objectStyles: [],
+        tableStyles: [],
+        cellStyles: [],
+        preflightOptions: { preflightOff: false },
+        documentPreferences: {},
+        viewPreferences: {}
+    };
+    const { getItemCandidates } = helpers(doc);
+    const candidates = getItemCandidates({ pageIndex: 0, includeParentItems: false }, []);
+    assert.equal(candidates.length, 2);
+    assert.equal(candidates.some((item) => item.id === 2), true);
+}
+
+{
+    const helpers = compileInspectionHelpers();
+    const hiddenLayer = { name: 'Hidden Layer', visible: false };
+    const visibleLayer = { name: 'Visible Layer', visible: true };
+    const doc = {
+        pages: [{
+            id: 10,
+            allPageItems: [
+                { id: 1, name: 'visible-overset', constructor: { name: 'TextFrame' }, visible: true, overflows: true, contents: 'visible body', itemLayer: visibleLayer, parentPage: { id: 10 }, label: {} },
+                { id: 2, name: 'hidden-overset', constructor: { name: 'TextFrame' }, visible: false, overflows: true, contents: 'hidden body', itemLayer: hiddenLayer, parentPage: { id: 10 }, label: {} }
+            ]
+        }],
+        spreads: [{ id: 20, allPageItems: [], pageItems: [] }],
+        links: [],
+        fonts: [],
+        layers: [],
+        swatches: [],
+        paragraphStyles: [],
+        characterStyles: [],
+        objectStyles: [],
+        tableStyles: [],
+        cellStyles: [],
+        preflightOptions: { preflightOff: false },
+        documentPreferences: {},
+        viewPreferences: {}
+    };
+    const { checkOversetText } = helpers(doc);
+    const result = checkOversetText({ pageIndex: 0, includeHidden: false, includeTextExcerpt: false, limit: 10, offset: 0 });
+    assert.equal(result.issues.length, 1);
+    assert.equal(result.issues[0].objectName, 'visible-overset');
+    assert.equal(result.pagination.totalMatched, 1);
+    const hiddenIncluded = checkOversetText({ pageIndex: 0, includeHidden: true, includeTextExcerpt: true, limit: 10, offset: 0 });
+    assert.equal(hiddenIncluded.issues.length, 2);
+    assert.equal(Object.prototype.hasOwnProperty.call(hiddenIncluded.issues[1], 'textExcerpt'), true);
+}
+
+{
+    const helpers = compileInspectionHelpers();
+    const hiddenLayer = { name: 'Hidden Layer', visible: false };
+    const visibleLayer = { name: 'Visible Layer', visible: true };
+    const doc = {
+        pages: [{
+            id: 10,
+            allPageItems: [
+                { id: 1, name: 'alpha-hidden', constructor: { name: 'Rectangle' }, visible: false, locked: true, itemLayer: hiddenLayer, parentPage: { id: 10 }, label: { source: 'agent_created' } },
+                { id: 2, name: 'beta-hidden', constructor: { name: 'Rectangle' }, visible: false, locked: true, itemLayer: visibleLayer, parentPage: { id: 10 }, label: { source: 'agent_created' } }
+            ]
+        }],
+        spreads: [{ id: 20, allPageItems: [], pageItems: [] }],
+        links: [],
+        fonts: [],
+        layers: [],
+        swatches: [],
+        paragraphStyles: [],
+        characterStyles: [],
+        objectStyles: [],
+        tableStyles: [],
+        cellStyles: [],
+        preflightOptions: { preflightOff: false },
+        documentPreferences: {},
+        viewPreferences: {}
+    };
+    const { checkHiddenOrLockedProblemItems } = helpers(doc);
+    const result = checkHiddenOrLockedProblemItems({ pageIndex: 0, includeHidden: false, layerName: 'Visible Layer', limit: 10, offset: 0 });
+    assert.equal(result.issues.length, 1);
+    assert.equal(result.issues[0].objectName, 'beta-hidden');
+    assert.equal(result.pagination.totalMatched, 1);
 }
 
 console.log('Template inspection bounds tests passed');
