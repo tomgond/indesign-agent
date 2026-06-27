@@ -503,9 +503,21 @@ export class TemplateHandlers {
         return response((async () => {
             const m = loadWorkspace();
             const folders = Object.fromEntries(['input','work','previews','exports','versions','logs','assets'].map((d) => [d, fs.existsSync(path.join(m.workspaceRoot, d))]));
+            const uxpExecution = getUxpBusyGateStatus();
+            const warnings = [];
             let active = null;
-            try { active = await this.rawValidateActive(); } catch (e) { active = { ok: false, error: e.message }; }
-            return { workspaceRoot: m.workspaceRoot, workingCopyPath: m.workingCopyPath, folders, activeVersionId: m.activeVersionId, versionCount: m.versions.length, previewCount: m.previews.length, derivatives: m.derivatives, activeDocument: active, uxpExecution: getUxpBusyGateStatus() };
+            if (uxpExecution.busy) {
+                warnings.push('Skipped active document validation because another UXP tool is busy');
+            } else {
+                try { active = await this.rawValidateActive(); } catch (e) { active = { ok: false, error: e.message }; }
+            }
+            let bridgeStatus = null;
+            try {
+                bridgeStatus = await ScriptExecutor.bridgeStatus();
+            } catch (error) {
+                bridgeStatus = { ok: false, error: error.message };
+            }
+            return { workspaceRoot: m.workspaceRoot, workingCopyPath: m.workingCopyPath, folders, activeVersionId: m.activeVersionId, versionCount: m.versions.length, previewCount: m.previews.length, derivatives: m.derivatives, activeDocument: active, bridgeStatus, uxpExecution, warnings };
         })(), 'get_workspace_status');
     }
 

@@ -40,6 +40,7 @@ const PURE_TEMPLATE_TOOL_NAMES = new Set([
     'attach_template_workspace',
     'copy_original_to_workspace',
     'validate_workspace_path',
+    'get_workspace_status',
     'list_versions',
     'return_preview_as_image',
     'record_visual_review',
@@ -120,7 +121,7 @@ export class InDesignMCPServer {
     }
 
     formatGateErrorResponse(name, error) {
-        if (error && (error.code === 'INDESIGN_BUSY' || error.code === 'INDESIGN_BRIDGE_DIRTY')) {
+        if (error && error.code === 'INDESIGN_BUSY') {
             return {
                 success: false,
                 operation: name,
@@ -128,7 +129,6 @@ export class InDesignMCPServer {
                 code: error.code,
                 busy: true,
                 ...(error.active ? { active: error.active } : {}),
-                ...(error.dirtyAfterTimeout ? { dirtyAfterTimeout: error.dirtyAfterTimeout } : {}),
                 timestamp: new Date().toISOString()
             };
         }

@@ -278,7 +278,6 @@ function startBridgeServer() {
   wss.on('connection', (ws) => {
     console.log('[Bridge] Plugin connected');
     pluginSocket = ws;
-    clearDirtyTimeoutState('plugin_connected');
 
     ws.on('message', (data) => {
       let rawStr;

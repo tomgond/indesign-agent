@@ -3,9 +3,6 @@ const { entrypoints } = require("uxp");
 
 const statusEl = document.getElementById("status");
 
-// Named constant; UXP has no process.env so change here if needed.
-const PLUGIN_TIMEOUT_MS = 25000;
-
 function byteLength(value) {
   const str = String(value || '');
   try {
@@ -48,7 +45,6 @@ function sandboxedRequire(moduleName) {
 async function handleExecute(ws, msg) {
   const { id, code, traceId, toolName, phase } = msg;
   const codeBytes = byteLength(code || '');
-  let timerId;
 
   logEvent({
     event: "execute_received",
@@ -58,21 +54,12 @@ async function handleExecute(ws, msg) {
   });
 
   const execStart = Date.now();
-  let timedOut = false;
 
   try {
     // Pass sandboxedRequire so code inside new Function() can call require('indesign') etc.
     // new Function() runs in global scope and loses UXP's module-scoped require.
     const fn = new Function('app', 'require', `return (async () => { ${msg.code} })()`);
-    const result = await Promise.race([
-      fn(app, sandboxedRequire).finally(() => clearTimeout(timerId)),
-      new Promise((_, reject) => {
-        timerId = setTimeout(() => {
-          timedOut = true;
-          reject(new Error(`Execution timed out in plugin (${PLUGIN_TIMEOUT_MS}ms)`));
-        }, PLUGIN_TIMEOUT_MS);
-      }),
-    ]);
+    const result = await fn(app, sandboxedRequire);
     const pluginExecutionMs = Date.now() - execStart;
 
     // Measure serialization time
@@ -106,7 +93,6 @@ async function handleExecute(ws, msg) {
       event: "execute_error",
       traceId, toolName, phase, requestId: id,
       pluginExecutionMs,
-      timedOut,
       ok: false,
       error: errorMsg,
     });

@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
+import path from 'node:path';
+
+import { initWorkspace, clearActiveWorkspace } from '../src/core/workspaceState.js';
 
 delete process.env.INDESIGN_BRIDGE_FETCH_TIMEOUT_MS;
 delete process.env.INDESIGN_BRIDGE_EXEC_TIMEOUT_MS;
@@ -11,7 +15,7 @@ const require = createRequire(import.meta.url);
 const WebSocket = require('ws');
 const { TIMEOUT_MS } = require('../bridge/server.js');
 
-const { withUxpBusyGate, markUxpDirtyAfterTimeout, clearUxpDirtyAfterTimeout, getUxpBusyGateStatus } = await import('../src/core/uxpBusyGate.js');
+const { withUxpBusyGate, getUxpBusyGateStatus } = await import('../src/core/uxpBusyGate.js');
 const { InDesignMCPServer } = await import('../src/core/InDesignMCPServer.js');
 const { TemplateHandlers } = await import('../src/handlers/templateHandlers.js');
 const { EXECUTE_TIMEOUT_MS } = await import('../src/core/scriptExecutor.js');
@@ -55,7 +59,6 @@ async function test(name, fn) {
 
 async function runGateTests() {
     await test('MCP busy/free gate rejects concurrent UXP work', async () => {
-        clearUxpDirtyAfterTimeout();
         assert.equal(getUxpBusyGateStatus().busy, false);
         const release = {};
         const first = withUxpBusyGate({ toolName: 'first_tool' }, () => new Promise((resolve) => {
@@ -75,22 +78,37 @@ async function runGateTests() {
         assert.equal(third, 'ok');
     });
 
-    await test('MCP dirty gate rejects work', async () => {
-        clearUxpDirtyAfterTimeout();
-        markUxpDirtyAfterTimeout({ requestId: 'req-1', traceId: 'trace-1', toolName: 'dirty_tool', timedOutAt: '2026-06-27T00:00:00.000Z', timeoutMs: 60000 });
-        assert.equal(getUxpBusyGateStatus().dirtyAfterTimeout.requestId, 'req-1');
-        const error = await expectReject(
-            withUxpBusyGate({ toolName: 'blocked_tool' }, async () => 'nope'),
-            'INDESIGN_BRIDGE_DIRTY'
-        );
-        assert.equal(error.busy, true);
-        assert.equal(error.dirtyAfterTimeout.requestId, 'req-1');
-        clearUxpDirtyAfterTimeout();
-        assert.equal(await withUxpBusyGate({ toolName: 'clean_tool' }, async () => 'ok'), 'ok');
+    await test('get_workspace_status skips UXP validation while busy', async () => {
+        const root = fs.mkdtempSync(path.join(process.cwd(), '.tmp-status-'));
+        const originalSourcePath = path.join(root, 'original.indd');
+        const workspaceRoot = path.join(root, 'workspace');
+        fs.writeFileSync(originalSourcePath, 'fake-indd');
+        initWorkspace({ originalSourcePath, workspaceRoot, overwriteExistingWorkspace: true });
+
+        const originalRawValidateActive = TemplateHandlers.rawValidateActive;
+        TemplateHandlers.rawValidateActive = async () => {
+            throw new Error('rawValidateActive should not run while busy');
+        };
+        const { ScriptExecutor } = await import('../src/core/scriptExecutor.js');
+        const originalBridgeStatusMethod = ScriptExecutor.bridgeStatus;
+        ScriptExecutor.bridgeStatus = async () => ({ ok: true, connected: true, queueDepth: 0 });
+
+        try {
+            const status = await withUxpBusyGate({ toolName: 'busy_tool' }, async () => TemplateHandlers.get_workspace_status());
+            assert.equal(status.success, true);
+            assert.equal(status.result.uxpExecution.busy, true);
+            assert.ok(Array.isArray(status.result.warnings));
+            assert.ok(status.result.warnings.some((warning) => /Skipped active document validation/i.test(warning)));
+            assert.equal(status.result.activeDocument, null);
+        } finally {
+            TemplateHandlers.rawValidateActive = originalRawValidateActive;
+            ScriptExecutor.bridgeStatus = originalBridgeStatusMethod;
+            clearActiveWorkspace();
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 
     await test('MCP boundary gates template UXP tools', async () => {
-        clearUxpDirtyAfterTimeout();
         const originalHandle = TemplateHandlers.handle;
         const calls = [];
         let releaseFirst;
@@ -120,6 +138,15 @@ async function runGateTests() {
         } finally {
             TemplateHandlers.handle = originalHandle;
         }
+    });
+}
+
+async function runPluginSourceTest() {
+    await test('Plugin no longer has synthetic timeout path', async () => {
+        const pluginSource = fs.readFileSync(path.join(process.cwd(), 'plugin/index.js'), 'utf8');
+        assert.ok(!/PLUGIN_TIMEOUT_MS/.test(pluginSource));
+        assert.ok(!/Promise\.race\s*\(/.test(pluginSource));
+        assert.match(pluginSource, /const result = await fn\(app, sandboxedRequire\);/);
     });
 }
 
@@ -298,6 +325,7 @@ async function runBridgeTests() {
 
 try {
     await runGateTests();
+    await runPluginSourceTest();
     await runBridgeTests();
     console.log('\nExecution safety tests passed');
 } catch (error) {
