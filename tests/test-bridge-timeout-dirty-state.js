@@ -6,6 +6,8 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const WebSocket = require('ws');
+const priorBridgeToken = process.env.BRIDGE_TOKEN;
+delete process.env.BRIDGE_TOKEN;
 const { startBridgeServer } = require('../bridge/server.js');
 const { readBridgeLogs } = require('../bridge/runtimeLogger.cjs');
 
@@ -178,6 +180,8 @@ try {
         await new Promise((resolve) => ws.once('close', resolve)).catch(() => {});
     }
     await bridge.close();
+    if (priorBridgeToken == null) delete process.env.BRIDGE_TOKEN;
+    else process.env.BRIDGE_TOKEN = priorBridgeToken;
     if (priorBridgeLogPath == null) delete process.env.INDESIGN_BRIDGE_LOG_PATH;
     else process.env.INDESIGN_BRIDGE_LOG_PATH = priorBridgeLogPath;
     fs.rmSync(root, { recursive: true, force: true });

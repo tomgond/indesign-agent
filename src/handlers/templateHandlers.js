@@ -1329,7 +1329,7 @@ export class TemplateHandlers {
             const pageIndex = args.pageIndex ?? 0;
             const bundle = await this.uxpTool('inspect_document_bundle', {});
             const items = args.includeItems === false ? { items: [] } : await this.uxpTool('inspect_page_items_v2', { pageIndex, includeHidden: false, includeTextExcerpt: false, includeTextMetadata: true, includeImageMetadata: false, includePathPoints: false, detailLevel: 'standard', limit: args.limit ?? 500 });
-            const grid = args.includeGrid ? await this.inspect_layout_grid({ pageIndex }) : null;
+            const grid = args.includeGrid ? await this.inspect_layout_grid({ pageIndex, limit: args.limit }) : null;
             const visibleItems = items.items || [];
             const fontCounts = new Map();
             const geometryCounts = new Map();

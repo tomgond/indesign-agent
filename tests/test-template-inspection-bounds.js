@@ -223,6 +223,7 @@ function compileInspectionHelpers() {
     assert.ok(designSystemBranch.includes('includeTextExcerpt: false'));
     assert.ok(designSystemBranch.includes('includeImageMetadata: false'));
     assert.ok(designSystemBranch.includes('includePathPoints: false'));
+    assert.ok(designSystemBranch.includes('inspect_layout_grid({ pageIndex, limit: args.limit })'));
 }
 
 {
