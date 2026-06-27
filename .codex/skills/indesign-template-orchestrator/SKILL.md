@@ -35,6 +35,11 @@ Coordinate real editable InDesign document construction through the MCP server:
 8. Do not claim final completion without derivative checks and roundtrip or finalization evidence.
 9. Do not use `execute_indesign_code` for normal template generation.
 10. Do not parallelize InDesign mutations through the bridge.
+11. Use low-cost preview checkpoints by default: `previewQuality: "checkpoint"`.
+12. Prefer exported previews for document truth; use live screenshots only for viewport or UI diagnosis.
+13. Do not run layer debugging by default. Use `diagnose_visual_mismatch` only on preview/inspection contradiction.
+14. Never call `update_text_slot` with `fit:true`; treat content mutation and fitting as separate steps.
+15. If `fit_text_to_frame` fails with a runtime or syntax error in a session, avoid fit/autoFit repair paths for the rest of that session.
 
 ## Workflow
 
@@ -92,6 +97,8 @@ Load [references/executor.md](references/executor.md) and run one derivative or 
 - Validate the working copy before any mutation batch.
 - Stop on the first unexpected mutating failure.
 - Export preview and inspect after the batch when required.
+- Use `checkpoint` previews for normal mutation batches and only raise preview quality for review/final proof.
+- If a page looks blank, solid, or missing expected motifs while inspection still shows objects, run `diagnose_visual_mismatch` before changing content.
 
 ### 5. Critique
 
@@ -100,6 +107,7 @@ Load [references/critic.md](references/critic.md) after preview export.
 - If the verdict is `repair`, execute only the critic's concrete repair batch.
 - If the verdict is `replan` or two repair loops fail, return to planning instead of compounding edits.
 - Do not claim visual quality without preview evidence.
+- If one diagnosis plus one repair batch does not resolve a preview/inspection mismatch, replan or rebuild instead of compounding salvage edits.
 
 ### 6. Preflight And Finalize
 
@@ -112,6 +120,7 @@ Load [references/preflight.md](references/preflight.md) once the derivative is v
 - Require generated objects to be semantically labeled.
 - Require roundtrip verification before release.
 - Finalize and save a version only when release criteria pass.
+- Treat multiple independent failures as a salvage threshold: unresolved preview mismatch, fitting runtime failure, damaged known-good copy, or two repair batches that worsen the page should trigger rollback/replan instead of more patching.
 
 ## Role Boundaries
 

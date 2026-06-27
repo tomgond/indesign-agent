@@ -6,7 +6,7 @@ import path from 'node:path';
 import { formatResponse } from '../src/utils/stringUtils.js';
 import { formatMcpContent } from '../src/core/InDesignMCPServer.js';
 import { ScreenshotHandlers } from '../src/handlers/screenshotHandlers.js';
-import { TemplateHandlers, normalizePreviewOutputName } from '../src/handlers/templateHandlers.js';
+import { TemplateHandlers, normalizePreviewOutputName, resolvePreviewExportSettings } from '../src/handlers/templateHandlers.js';
 import { PageHandlers } from '../src/handlers/pageHandlers.js';
 import { DocumentHandlers } from '../src/handlers/documentHandlers.js';
 import { ScriptExecutor } from '../src/core/scriptExecutor.js';
@@ -142,10 +142,14 @@ try {
             resolvedBy: 'test',
             warnings: []
         });
+        const seenResolutions = [];
         ScriptExecutor.executeViaUXP = async (code) => {
             const match = code.match(/const out = (".*?");/s);
             assert.ok(match, 'expected export code to contain an output path');
             const out = Function(`return (${match[1]});`)();
+            const resolutionMatch = code.match(/const resolution = (\d+);/);
+            assert.ok(resolutionMatch, 'expected export code to contain a resolution');
+            seenResolutions.push(Number(resolutionMatch[1]));
             writePng(out);
             return { success: true, path: out };
         };
@@ -159,15 +163,20 @@ try {
         assert.equal(pagePreview.success, true);
         assert.ok(pagePreview.result.path.endsWith(`${path.sep}previews${path.sep}invite-poster-a4-manual.png`));
         assert.ok(pagePreview.result.mcpImage);
+        assert.equal(pagePreview.result.previewQuality, 'checkpoint');
+        assert.equal(pagePreview.result.resolution, 48);
 
         const pagePreviewExact = await TemplateHandlers.export_page_preview({
             pageIndex: 0,
             outputName: 'invite-poster-a4-manual.png',
             format: 'png',
+            previewQuality: 'review',
             overwrite: true
         });
         assert.equal(pagePreviewExact.success, true);
         assert.ok(pagePreviewExact.result.path.endsWith('invite-poster-a4-manual.png'));
+        assert.equal(pagePreviewExact.result.previewQuality, 'review');
+        assert.equal(pagePreviewExact.result.resolution, 96);
 
         const mismatch = await TemplateHandlers.export_page_preview({
             pageIndex: 0,
@@ -188,11 +197,15 @@ try {
         assert.equal(derivativePreview.result.previewId, 'preview_invite_poster_a4_001');
         assert.ok(derivativePreview.result.path.endsWith(`${path.sep}previews${path.sep}invite_poster_a4__8__preview_001.png`));
         assert.ok(derivativePreview.result.mcpImage);
+        assert.equal(derivativePreview.result.previewQuality, 'checkpoint');
+        assert.equal(derivativePreview.result.resolution, 48);
 
         const updatedManifest = loadWorkspace();
         const storedPreview = updatedManifest.previews.find((preview) => preview.previewId === 'preview_invite_poster_a4_001');
         assert.ok(storedPreview);
         assert.ok(!('mcpImage' in storedPreview));
+        assert.equal(storedPreview.previewQuality, 'checkpoint');
+        assert.equal(storedPreview.resolution, 48);
         const derivativeRecord = updatedManifest.derivatives.find((item) => item.derivativeId === 'invite_poster_a4');
         assert.equal(derivativeRecord.latestPreviewId, 'preview_invite_poster_a4_001');
         assert.ok(derivativeRecord.previewIds.includes('preview_invite_poster_a4_001'));
@@ -229,6 +242,21 @@ try {
         });
         assert.ok(!legacy.result.mcpImage);
         assert.ok(legacy.result.dataBase64);
+
+        const tooLarge = await TemplateHandlers.return_preview_as_image({
+            previewId: 'preview_invite_poster_a4_001',
+            maxInlineBytes: 1
+        });
+        assert.equal(tooLarge.success, false);
+        assert.match(String(tooLarge.result), /maxInlineBytes/);
+        assert.deepEqual(seenResolutions, [48, 96, 48]);
+    }
+
+    {
+        assert.deepEqual(resolvePreviewExportSettings({}), { previewQuality: 'checkpoint', resolution: 48 });
+        assert.deepEqual(resolvePreviewExportSettings({ previewQuality: 'review' }), { previewQuality: 'review', resolution: 96 });
+        assert.deepEqual(resolvePreviewExportSettings({ previewQuality: 'final' }), { previewQuality: 'final', resolution: 150 });
+        assert.deepEqual(resolvePreviewExportSettings({ previewQuality: 'checkpoint', resolution: 110 }), { previewQuality: 'checkpoint', resolution: 110 });
     }
 
     console.log('Preview image response tests passed');

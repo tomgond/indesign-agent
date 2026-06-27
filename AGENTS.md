@@ -25,6 +25,12 @@ The current architecture is UXP-first. Do not reintroduce AppleScript or ExtendS
 - Treat live InDesign behavior as unverified until it has been exercised against a real bridge/plugin/InDesign session.
 - Keep docs aligned with the current server architecture and transport.
 - Update docs when changing tool behavior, setup, or validation status.
+- For editable derivative work, prefer exported preview checkpoints over live screenshots for document truth.
+- Use low-cost preview checkpoints by default: `previewQuality: "checkpoint"` unless review/final proof needs more detail.
+- Run `diagnose_visual_mismatch` only when preview evidence and structured inspection materially disagree.
+- Use `set_item_layer` or explicit z-order tools for layer repairs; do not make layer debugging a default loop.
+- Do not call `update_text_slot` with `fit:true`; change text first, inspect/export, then call `fit_text_to_frame` separately if needed.
+- If `fit_text_to_frame` fails with a runtime or syntax error in a live session, stop using fit/autoFit paths in that session and repair via frame geometry instead.
 
 ## Verification
 

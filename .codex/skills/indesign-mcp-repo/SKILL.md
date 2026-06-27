@@ -27,6 +27,7 @@ Use this skill for normal repository maintenance in this workspace.
 - Keep docs honest about what is locally tested versus live-validated.
 - When touching setup, tool behavior, or validation status, update the matching docs in the same pass.
 - For template-generation work, check `docs/template-generation/IMPLEMENTATION_STATUS.md` before claiming completeness.
+- For editable derivative work, prefer exported preview checkpoints over repeated live screenshots, default preview quality to `checkpoint`, and keep text mutation separate from fitting.
 
 ## Verification
 

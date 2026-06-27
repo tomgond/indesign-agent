@@ -33,6 +33,7 @@ Allowed tools:
 - `inspect_layout_grid`
 - `analyze_design_system`
 - `inspect_derivative`
+- `diagnose_visual_mismatch`
 - `compare_derivative_state`
 - `list_named_objects`
 - `find_objects_by_label`
@@ -48,7 +49,8 @@ Allowed tools:
 3. Inspect styles, swatches, layers, and parent pages to identify reusable design-system resources.
 4. For likely base pages, inspect geometry, page items, layout grid, and design-system hints.
 5. Discover semantic objects through names and labels when useful.
-6. Flag blockers aggressively: active-document mismatch, missing workspace, missing links or fonts, overset text, locked layers, raster-only base design, or zero-item derivative pages.
+6. When a preview is blank, solid, or missing expected objects while inspection still shows structure, run `diagnose_visual_mismatch` once and report the likely causes.
+7. Flag blockers aggressively: active-document mismatch, missing workspace, missing links or fonts, overset text, locked layers, raster-only base design, or zero-item derivative pages.
 
 ## Output Requirements
 

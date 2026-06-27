@@ -129,6 +129,26 @@ export function normalizePreviewOutputName(outputName, format, fallbackName) {
     return raw;
 }
 
+const PREVIEW_QUALITY_RESOLUTION = Object.freeze({
+    checkpoint: 48,
+    review: 96,
+    final: 150
+});
+
+export function resolvePreviewExportSettings(args = {}) {
+    const previewQuality = Object.hasOwn(PREVIEW_QUALITY_RESOLUTION, args.previewQuality)
+        ? args.previewQuality
+        : 'checkpoint';
+    const resolvedResolution = args.resolution != null ? Number(args.resolution) : PREVIEW_QUALITY_RESOLUTION[previewQuality];
+    if (!Number.isFinite(resolvedResolution) || resolvedResolution <= 0) {
+        throw new Error('resolution must be a positive number');
+    }
+    return {
+        previewQuality,
+        resolution: resolvedResolution
+    };
+}
+
 function resolveWorkspaceImagePath(requestedPath, manifest = loadWorkspace()) {
     if (!requestedPath) throw new Error('imagePath is required');
     try { return assertWorkspacePath(requestedPath, { kind: 'assets', manifest }).path; }
@@ -749,6 +769,9 @@ export class TemplateHandlers {
                 createdAt: rec.createdAt || null
             };
             if (args.returnImage !== false) {
+                if (args.maxInlineBytes != null && stat.sizeBytes > Number(args.maxInlineBytes)) {
+                    throw new Error(`Preview exceeds maxInlineBytes: ${stat.sizeBytes} > ${Number(args.maxInlineBytes)}`);
+                }
                 result.mcpImage = buildMcpImagePayload(checked, result.mimeType);
             }
             if (args.legacyDataBase64 === true) {
@@ -1133,8 +1156,8 @@ export class TemplateHandlers {
             function applyTracking(value){ const t = firstTextRange(); if (t) t.tracking = value; }
             const before = state();
             const minPointSize = Number(args.minPointSize ?? 6);
-            const maxPointSize = Number(args.maxPointSize ?? before.pointSize || 72);
-            const minLeading = Number(args.minLeading ?? Math.max(6, before.leading || before.pointSize || 6));
+            const maxPointSize = Number(args.maxPointSize ?? (before.pointSize || 72));
+            const minLeading = Number(args.minLeading ?? Math.max(6, (before.leading || before.pointSize || 6)));
             const minTracking = Number(args.minTracking ?? -50);
             const maxIterations = Number(args.maxIterations ?? 12);
             let iterations = 0;
@@ -1165,6 +1188,7 @@ export class TemplateHandlers {
             if (!args.derivativeId && args.pageIndex == null) throw new Error('derivativeId or pageIndex is required');
             const resolved = args.derivativeId ? unwrapToolResult(await this.resolve_derivative_page({ derivativeId: args.derivativeId })) : { pageIndex: args.pageIndex, pageId: null };
             const manifest = loadWorkspace();
+            const previewSettings = resolvePreviewExportSettings(args);
             const ext = (args.format || 'png').toLowerCase() === 'jpg' ? 'jpg' : 'png';
             const derivativeId = args.derivativeId || this.resolveDerivativeRecord(manifest, { pageIndex: resolved.pageIndex }).derivativeId;
             const existing = (manifest.previews || []).filter((preview) => preview.derivativeId === derivativeId && preview.pageIndex === resolved.pageIndex);
@@ -1173,7 +1197,16 @@ export class TemplateHandlers {
                 ext,
                 `${derivativeId}__${resolved.pageIndex}__preview_${String(existing.length + 1).padStart(3, '0')}`
             );
-            const rec = unwrapToolResult(await this.exportPreview('page', { ...args, derivativeId, pageIndex: resolved.pageIndex, format: ext, outputName, overwrite: args.overwrite }));
+            const rec = unwrapToolResult(await this.exportPreview('page', {
+                ...args,
+                derivativeId,
+                pageIndex: resolved.pageIndex,
+                format: ext,
+                outputName,
+                overwrite: args.overwrite,
+                previewQuality: previewSettings.previewQuality,
+                resolution: previewSettings.resolution
+            }));
             const previewId = `preview_${derivativeId}_${String(existing.length + 1).padStart(3, '0')}`;
             const preview = {
                 ...rec,
@@ -1184,6 +1217,8 @@ export class TemplateHandlers {
                 spreadIndex: resolved.spreadIndex ?? null,
                 mimeType: rec.mimeType || (ext === 'jpg' ? 'image/jpeg' : 'image/png'),
                 format: ext,
+                previewQuality: rec.previewQuality || previewSettings.previewQuality,
+                resolution: rec.resolution || previewSettings.resolution,
                 createdAt: nowIso(),
             };
             const fresh = loadWorkspace();
@@ -1363,20 +1398,258 @@ export class TemplateHandlers {
         })(), 'replace_image_in_frame');
     }
 
+    static diagnose_visual_mismatch(args = {}) {
+        return response((async () => {
+            const manifest = loadWorkspace();
+            const resolved = args.derivativeId
+                ? unwrapToolResult(await this.resolve_derivative_page({ derivativeId: args.derivativeId }))
+                : unwrapToolResult(await this.resolve_derivative_page({ pageIndex: args.pageIndex }));
+            const derivative = args.derivativeId ? this.resolveDerivativeRecord(manifest, { derivativeId: args.derivativeId }) : null;
+            const mismatch = await runGuarded(`${jsHelpers()} const args=${q({
+                pageIndex: resolved.pageIndex,
+                includeHidden: args.includeHidden !== false,
+                minPageCoverageRatio: args.minPageCoverageRatio ?? 0.5,
+                limit: args.limit ?? 200
+            })};
+                const page = pageByIndex(args.pageIndex);
+                const pb = clone(page.bounds);
+                const pageArea = Math.max(1, rectArea(pb));
+                const rawItems = arr(page.allPageItems || page.pageItems, (item)=>item);
+                const layersByName = {};
+                const suspects = [];
+                const likelyCauses = [];
+                let visibleItemCount = 0;
+                let hiddenItemCount = 0;
+                let offPageCount = 0;
+
+                function pushCause(code){
+                    if (likelyCauses.indexOf(code) === -1) likelyCauses.push(code);
+                }
+                function swatchName(value){ return safe(()=>value && value.name, null); }
+                function boolOrNull(fn){ const value = safe(fn, null); return value == null ? null : !!value; }
+                function textSummary(item){
+                    if (!/TextFrame/i.test(String(safe(()=>item.constructor.name,'')))) return null;
+                    const excerpt = String(safe(()=>item.contents,'') || '').slice(0, 120);
+                    return { excerpt, overset: !!safe(()=>item.overflows, false) };
+                }
+                function itemVisibleState(item, layer){
+                    const layerVisible = boolOrNull(()=>layer.visible);
+                    const visible = boolOrNull(()=>item.visible);
+                    return visible !== false && layerVisible !== false;
+                }
+                function severityFor(item){
+                    const visible = item.visible !== false;
+                    if (visible && item.pageCoverageRatio >= args.minPageCoverageRatio && item.hasFill) return 100;
+                    if (visible && item.pageCoverageRatio >= 0.25) return 80;
+                    if (item.text && (item.text.overset || !item.text.excerpt.trim())) return 70;
+                    if (item.pageCoverageRatio === 0) return 60;
+                    if (item.layerVisible === false || item.visible === false || item.nonprinting === true) return 50;
+                    if (item.layerLocked === true || item.locked === true) return 40;
+                    return 10;
+                }
+                function reasonFor(item){
+                    if (item.visible && item.hasFill && item.pageCoverageRatio >= args.minPageCoverageRatio) return 'Visible filled object covers most of the target page and may occlude lower-layer content.';
+                    if (item.layerVisible === false) return 'Object sits on a hidden layer.';
+                    if (item.layerLocked === true) return 'Object sits on a locked layer that may block repair.';
+                    if (item.visible === false || item.nonprinting === true) return 'Object is hidden or nonprinting.';
+                    if (item.text && item.text.overset) return 'Text frame is overset and may not render expected copy.';
+                    if (item.text && !item.text.excerpt.trim()) return 'Text frame is empty.';
+                    if (item.pageCoverageRatio === 0) return 'Object is entirely off the target page.';
+                    if (item.pageCoverageRatio < 0.1) return 'Object is mostly outside the target page.';
+                    return 'Structured object exists but needs visual review.';
+                }
+
+                for (let index = 0; index < rawItems.length; index++) {
+                    if (suspects.length >= args.limit) break;
+                    const item = rawItems[index];
+                    const layer = safe(()=>item.itemLayer, null);
+                    const layerName = safe(()=>layer && layer.name, null) || 'Unassigned';
+                    if (!layersByName[layerName]) {
+                        layersByName[layerName] = {
+                            name: layerName,
+                            visible: boolOrNull(()=>layer.visible),
+                            locked: boolOrNull(()=>layer.locked),
+                            printable: boolOrNull(()=>layer.printable),
+                            itemCountOnPage: 0
+                        };
+                    }
+                    layersByName[layerName].itemCountOnPage += 1;
+
+                    const bounds = clone(safe(()=>item.geometricBounds, null));
+                    if (!Array.isArray(bounds) || bounds.length !== 4) continue;
+                    const intersection = intersectBounds(bounds, pb);
+                    const itemArea = Math.max(1, rectArea(bounds));
+                    const visible = itemVisibleState(item, layer);
+                    if (visible) visibleItemCount += 1;
+                    else hiddenItemCount += 1;
+                    const pageCoverageRatio = intersection ? Number((rectArea(intersection) / pageArea).toFixed(4)) : 0;
+                    if (!intersection) offPageCount += 1;
+                    if (args.includeHidden !== true && !visible) continue;
+
+                    const info = {
+                        objectId: safe(()=>item.id, null),
+                        name: safe(()=>item.name, null),
+                        type: safe(()=>item.constructor.name, null),
+                        bounds,
+                        layerName,
+                        layerVisible: boolOrNull(()=>layer.visible),
+                        layerLocked: boolOrNull(()=>layer.locked),
+                        layerPrintable: boolOrNull(()=>layer.printable),
+                        visible: boolOrNull(()=>item.visible),
+                        locked: boolOrNull(()=>item.locked),
+                        nonprinting: boolOrNull(()=>item.nonprinting),
+                        fillSwatch: swatchName(safe(()=>item.fillColor, null)),
+                        strokeSwatch: swatchName(safe(()=>item.strokeColor, null)),
+                        label: readLabel(item),
+                        text: textSummary(item),
+                        pageCoverageRatio,
+                        offPage: !intersection,
+                        hasFill: !!swatchName(safe(()=>item.fillColor, null)) && !/None/i.test(String(swatchName(safe(()=>item.fillColor, null)) || ''))
+                    };
+
+                    if (info.visible && info.hasFill && info.pageCoverageRatio >= args.minPageCoverageRatio) pushCause('full_page_occluder');
+                    if (info.layerVisible === false) pushCause('hidden_layer');
+                    if (info.layerLocked === true) pushCause('locked_layer');
+                    if (info.visible === false || info.nonprinting === true) pushCause('nonprinting_or_hidden_item');
+                    if (info.offPage) pushCause('off_page_objects');
+                    if (info.text && (info.text.overset || !info.text.excerpt.trim())) pushCause('overset_or_empty_text');
+
+                    info.reason = reasonFor(info);
+                    info.severity = severityFor(info);
+                    suspects.push(info);
+                }
+
+                suspects.sort((a, b) => b.severity - a.severity || b.pageCoverageRatio - a.pageCoverageRatio || (a.objectId || 0) - (b.objectId || 0));
+                const topSuspects = suspects.slice(0, Math.min(args.limit, 25)).map(({ severity, hasFill, offPage, ...rest }) => rest);
+                if (!visibleItemCount) pushCause('no_visible_items');
+                if (offPageCount && offPageCount === rawItems.length) pushCause('off_page_objects');
+                return {
+                    success: true,
+                    pageIndex: args.pageIndex,
+                    pageBounds: pb,
+                    summary: {
+                        visibleItemCount,
+                        hiddenItemCount,
+                        likelyMismatch: likelyCauses.length > 0
+                    },
+                    likelyCauses,
+                    topSuspects,
+                    layers: Object.values(layersByName)
+                };
+            `);
+            const likelyCauses = [...(mismatch.likelyCauses || [])];
+            if (derivative && derivative.pageIndex != null && derivative.pageIndex !== resolved.pageIndex && !likelyCauses.includes('export_page_mismatch')) {
+                likelyCauses.push('export_page_mismatch');
+            }
+            const recommendedNextStep = likelyCauses.includes('full_page_occluder')
+                ? 'Use set_item_layer or send_to_back on the suspected full-page background, then export a low-resolution checkpoint preview.'
+                : likelyCauses.includes('hidden_layer') || likelyCauses.includes('locked_layer')
+                    ? 'Repair the affected layer visibility or placement explicitly, then export a checkpoint preview.'
+                    : 'Compare structured inspection against a checkpoint preview again before making content edits.';
+            return {
+                success: true,
+                derivativeId: args.derivativeId || derivative?.derivativeId || null,
+                pageIndex: resolved.pageIndex,
+                pageBounds: mismatch.pageBounds,
+                summary: mismatch.summary,
+                likelyCauses,
+                topSuspects: mismatch.topSuspects || [],
+                layers: mismatch.layers || [],
+                recommendedNextStep
+            };
+        })(), 'diagnose_visual_mismatch');
+    }
+
+    static set_item_layer(args = {}) {
+        return response(runGuarded(`${jsHelpers()} const args=${q(args)};
+            const targetName = String(args.layerName || '').trim();
+            if (!targetName) throw new Error('layerName is required');
+            const ids = Array.isArray(args.objectIds) ? args.objectIds : [];
+            if (!ids.length) throw new Error('objectIds are required');
+            let targetLayer = safe(()=>doc.layers.itemByName(targetName), null);
+            let createdLayer = false;
+            if (!targetLayer || targetLayer.isValid === false) {
+                if (args.createIfMissing === false) throw new Error('Target layer not found and createIfMissing=false');
+                targetLayer = doc.layers.add({ name: targetName });
+                createdLayer = true;
+            }
+            const layerWarnings = [];
+            if (args.makeLayerVisible !== false && safe(()=>targetLayer.visible, true) === false) {
+                targetLayer.visible = true;
+                layerWarnings.push('Made target layer visible');
+            }
+            if (args.unlockLayer !== false && safe(()=>targetLayer.locked, false) === true) {
+                targetLayer.locked = false;
+                layerWarnings.push('Unlocked target layer');
+            }
+            const changed = [];
+            for (const id of ids) {
+                const item = itemById(id);
+                const before = {
+                    objectId: safe(()=>item.id),
+                    name: safe(()=>item.name),
+                    oldLayerName: safe(()=>item.itemLayer && item.itemLayer.name, null),
+                    bounds: clone(safe(()=>item.geometricBounds, null))
+                };
+                item.itemLayer = targetLayer;
+                let zOrderAction = 'unchanged';
+                if (args.zOrder === 'front') {
+                    item.bringToFront();
+                    zOrderAction = 'front';
+                } else if (args.zOrder === 'back') {
+                    item.sendToBack();
+                    zOrderAction = 'back';
+                }
+                changed.push(args.returnBeforeAfter === false ? {
+                    objectId: before.objectId,
+                    name: before.name,
+                    oldLayerName: before.oldLayerName,
+                    newLayerName: safe(()=>item.itemLayer && item.itemLayer.name, null),
+                    bounds: clone(safe(()=>item.geometricBounds, null)),
+                    zOrder: zOrderAction,
+                    warnings: layerWarnings.slice()
+                } : {
+                    objectId: before.objectId,
+                    name: before.name,
+                    oldLayerName: before.oldLayerName,
+                    newLayerName: safe(()=>item.itemLayer && item.itemLayer.name, null),
+                    bounds: clone(safe(()=>item.geometricBounds, null)),
+                    before,
+                    after: {
+                        objectId: safe(()=>item.id),
+                        name: safe(()=>item.name),
+                        newLayerName: safe(()=>item.itemLayer && item.itemLayer.name, null),
+                        bounds: clone(safe(()=>item.geometricBounds, null))
+                    },
+                    zOrder: zOrderAction,
+                    warnings: layerWarnings.slice()
+                });
+            }
+            return {
+                success: true,
+                layerName: safe(()=>targetLayer.name, targetName),
+                createdLayer,
+                changed
+            };
+        `), 'set_item_layer');
+    }
+
     static update_text_slot(args = {}) {
         return response((async () => {
             if (args.text == null) throw new Error('text is required');
+            if (args.fit === true) {
+                throw new Error('update_text_slot no longer supports fit=true; call fit_text_to_frame separately after inspecting the updated text.');
+            }
             const updated = await runGuarded(`${jsHelpers()} const args=${q(args)};
                 const it = resolveItem(args);
-                const prior = /TextFrame/i.test(String(safe(()=>it.constructor.name,''))) ? clone(itemSnapshot(it)) : null;
-                const textStyles = prior && args.preserveStyle !== false ? { paragraphStyle:safe(()=>it.paragraphs.item(0).appliedParagraphStyle.name, null), characterStyle:safe(()=>it.textStyleRanges.item(0).appliedCharacterStyle.name, null) } : null;
+                if (!/TextFrame/i.test(String(safe(()=>it.constructor.name,'')))) throw new Error('Target is not a text frame');
+                const before = textExcerpt(it);
+                const textStyles = args.preserveStyle !== false ? { paragraphStyle:safe(()=>it.paragraphs.item(0).appliedParagraphStyle.name, null), characterStyle:safe(()=>it.textStyleRanges.item(0).appliedCharacterStyle.name, null) } : null;
                 it.contents = String(args.text);
                 if (textStyles) applyTextStyles(it, textStyles);
-                return { success:true, objectId:safe(()=>it.id), name:safe(()=>it.name), text:textExcerpt(it) };
+                return { success:true, objectId:safe(()=>it.id), name:safe(()=>it.name), before, after:textExcerpt(it) };
             `);
-            let fitResult = null;
-            if (args.fit) fitResult = await this.fit_text_to_frame({ objectId: updated.objectId });
-            return { ...updated, ...(fitResult ? { fitResult } : {}) };
+            return updated;
         })(), 'update_text_slot');
     }
 
@@ -1782,6 +2055,7 @@ export class TemplateHandlers {
             const m = loadWorkspace();
             const execMeta = args.trace ? { traceId: args.trace.traceId, toolName: args.trace.toolName, phase: `exportPreview_${kind}` } : {};
             await this.ensureTemplateReady({ allowSwitchDocument: true, openIfMissing: true, trace: args.trace });
+            const previewSettings = resolvePreviewExportSettings(args);
             const ext = (args.format || 'png').toLowerCase() === 'jpg' ? 'jpg' : 'png';
             const outputName = normalizePreviewOutputName(args.outputName, ext, `${kind}_${args.pageIndex ?? args.spreadIndex}`);
             const out = assertWorkspacePath(path.join(m.workspaceRoot, 'previews', outputName), { kind: 'previews', manifest: m }).path;
@@ -1793,6 +2067,7 @@ export class TemplateHandlers {
                 const isJpg = ${q(ext === 'jpg')};
                 const pageIndex = ${q(pageIndex)};
                 const spreadIndex = ${q(args.spreadIndex ?? null)};
+                const resolution = ${q(previewSettings.resolution)};
                 let pageString = null;
                 if (${q(kind)} === 'page') {
                     if (pageIndex === null || pageIndex < 0 || pageIndex >= doc.pages.length) throw new Error('pageIndex out of range');
@@ -1808,11 +2083,11 @@ export class TemplateHandlers {
                 try {
                     if (isJpg && app.jpegExportPreferences) {
                         app.jpegExportPreferences.pageString = pageString;
-                        if (${q(args.resolution || null)} !== null) app.jpegExportPreferences.exportResolution = ${q(args.resolution || null)};
+                        app.jpegExportPreferences.exportResolution = resolution;
                     }
                     if (!isJpg && app.pngExportPreferences) {
                         app.pngExportPreferences.pageString = pageString;
-                        if (${q(args.resolution || null)} !== null) app.pngExportPreferences.exportResolution = ${q(args.resolution || null)};
+                        app.pngExportPreferences.exportResolution = resolution;
                         if (${q(args.transparentBackground ?? null)} !== null) app.pngExportPreferences.transparentBackground = ${q(args.transparentBackground ?? null)};
                     }
                 } catch(e) {}
@@ -1834,6 +2109,8 @@ export class TemplateHandlers {
                 filePath: out,
                 mimeType: info.mimeType,
                 format: ext,
+                previewQuality: previewSettings.previewQuality,
+                resolution: previewSettings.resolution,
                 widthPx: info.widthPx,
                 heightPx: info.heightPx,
                 sizeBytes: stat.sizeBytes,
@@ -1900,7 +2177,14 @@ export class TemplateHandlers {
             let preview = null;
             if (args.requirePreview !== false) {
                 preview = unwrapToolResult(await runPhase('export_derivative_preview', () =>
-                    this.export_derivative_preview({ derivativeId: args.derivativeId, pageIndex: resolved.pageIndex, overwrite: args.overwritePreview !== false, trace })
+                    this.export_derivative_preview({
+                        derivativeId: args.derivativeId,
+                        pageIndex: resolved.pageIndex,
+                        overwrite: args.overwritePreview !== false,
+                        previewQuality: args.previewQuality || 'checkpoint',
+                        returnImage: false,
+                        trace
+                    })
                 ));
                 if (!preview?.sizeBytes || !preview?.widthPx || !preview?.heightPx) issues.push({ check: 'preview', issue: 'Preview evidence missing or zero-sized' });
             }
@@ -1954,7 +2238,13 @@ export class TemplateHandlers {
                 this.save_version({ derivativeId: args.derivativeId, label: args.versionLabel || null, trace })
             ));
             const preview = args.requirePreview === false ? null : unwrapToolResult(await runPhase('export_derivative_preview', () =>
-                this.export_derivative_preview({ derivativeId: args.derivativeId, overwrite: true, trace })
+                this.export_derivative_preview({
+                    derivativeId: args.derivativeId,
+                    overwrite: true,
+                    previewQuality: args.previewQuality || 'final',
+                    returnImage: false,
+                    trace
+                })
             ));
             const roundtrip = unwrapToolResult(await runPhase('verify_template_roundtrip', () =>
                 this.verify_template_roundtrip({
@@ -1964,6 +2254,7 @@ export class TemplateHandlers {
                     requireNoOverset: args.requireNoOverset !== false,
                     requireNoMissingLinks: args.requireNoMissingLinks === true,
                     overwritePreview: true,
+                    previewQuality: args.previewQuality || 'checkpoint',
                     diagnostics: args.diagnostics === true,
                     traceId
                 })
@@ -2018,8 +2309,21 @@ export class TemplateHandlers {
             const checks = unwrapToolResult(await this.run_derivative_checks({ derivativeId: args.derivativeId, ...(args.checks || {}) }));
             const save = unwrapToolResult(await this.save_working_copy({}));
             const version = args.saveVersion === false ? null : unwrapToolResult(await this.save_version({ derivativeId: args.derivativeId, label: args.versionLabel || null }));
-            const preview = args.exportPreview === false ? null : unwrapToolResult(await this.export_derivative_preview({ derivativeId: args.derivativeId, overwrite: true }));
-            const roundtrip = unwrapToolResult(await this.verify_template_roundtrip({ derivativeId: args.derivativeId, expectedMinItems: Math.max(1, createdObjectIds.length), requirePreview: args.exportPreview !== false, requireNoOverset: args.checks?.requireNoOverset !== false, requireNoMissingLinks: args.checks?.requireNoMissingLinks === true, overwritePreview: true }));
+            const preview = args.exportPreview === false ? null : unwrapToolResult(await this.export_derivative_preview({
+                derivativeId: args.derivativeId,
+                overwrite: true,
+                previewQuality: args.previewQuality || 'checkpoint',
+                returnImage: false
+            }));
+            const roundtrip = unwrapToolResult(await this.verify_template_roundtrip({
+                derivativeId: args.derivativeId,
+                expectedMinItems: Math.max(1, createdObjectIds.length),
+                requirePreview: args.exportPreview !== false,
+                requireNoOverset: args.checks?.requireNoOverset !== false,
+                requireNoMissingLinks: args.checks?.requireNoMissingLinks === true,
+                overwritePreview: true,
+                previewQuality: args.previewQuality || 'checkpoint'
+            }));
             return { success: true, ok: !!roundtrip?.ok, derivativeId: args.derivativeId, pageIndex: page.pageIndex, pageId: page.pageId || null, createdObjectIds, inspectionSummary, checks: checks.checks || null, save, version, preview, roundtrip, ...(failedStep ? { failedStep } : {}) };
         })(), 'build_derivative_from_recipe');
     }

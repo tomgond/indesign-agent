@@ -25,6 +25,11 @@ These pieces are complete enough for Node-side use and have local checks:
 - Workspace-active guard for risky open/save/export/package paths covered in the local pass.
 - `return_preview_as_image` for an existing workspace PNG/JPG file, with MCP image output by default.
 - `capture_screen_preview`, `capture_indesign_screen_preview`, `export_page_preview`, `export_spread_preview`, and `export_derivative_preview` now return MCP images by default when the caller does not opt out.
+- Preview export quality presets with cheap `checkpoint` defaults, metadata (`previewQuality`, `resolution`, pixel size, bytes), and lower-cost internal preview calls in roundtrip/finalization flows.
+- `diagnose_visual_mismatch` for targeted read-only preview-vs-structure diagnosis on one page.
+- `set_item_layer` for explicit layer moves plus optional front/back repair.
+- `update_text_slot` now rejects `fit:true` before mutation and returns short before/after text evidence.
+- `fit_text_to_frame` nullish/boolean precedence fix plus local regression coverage.
 - Visual-review JSONL append/list and derivative status updates in manifest.
 - Fast Node tests for HTTP transport, workspace safety, bridge timeout dirty-state, UXP busy-gate, and inspection bounds.
 - Live MVP test scaffold that fails clearly without Mac/InDesign/bridge/plugin.
@@ -53,6 +58,8 @@ These tools have best-effort UXP snippets, but they are not complete until teste
 - `create_image_slot`
 - `fit_text_to_frame`
 - `export_derivative_preview`
+- `diagnose_visual_mismatch`
+- `set_item_layer`
 - `inspect_derivative`
 - `apply_layout_recipe`
 - `replace_image_in_frame`
@@ -106,6 +113,7 @@ Known risks in this group:
 - `doc.filePath` path shape may differ from the current string comparison.
 - Some InDesign collection names/properties may differ by version.
 - Export preferences/page range are not fully wired; preview export may export more than the requested page/spread.
+- Preview-quality presets and metadata are locally covered, but exact rendered fidelity still needs live InDesign validation.
 - Unit conversion is not implemented; bounds are passed through as-is.
 - `create_image_frame` does not place an image.
 - Preflight checks are basic DOM scans, not full production certification.
@@ -131,6 +139,15 @@ No registered template-generation tools intentionally return not-implemented aft
 - Derivative page/slot/recipe/check helpers now persist manifest state, deterministic preview naming, and inspection snapshots locally.
 
 Still pending: live Mac/InDesign retest after deployment and deeper fixture-driven completion of every optional inspection/preflight field.
+
+## June 27 reliability pass
+
+- Added targeted visual mismatch diagnosis instead of broad layer-debug loops.
+- Added explicit layer reassignment for derivative repair work.
+- Made preview exports default to low-cost `checkpoint` quality unless callers opt into `review`, `final`, or an explicit resolution.
+- Stopped `verify_template_roundtrip`, `finalize_derivative`, and `build_derivative_from_recipe` from inlining preview images by default.
+- Separated text mutation from fitting by rejecting `update_text_slot({ fit: true })`.
+- Added focused local regressions plus an optional live reliability script: `tests/test-template-reliability-live.js`.
 
 ## What it takes to finish
 

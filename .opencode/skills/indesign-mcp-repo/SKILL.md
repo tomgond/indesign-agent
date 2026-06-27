@@ -22,6 +22,7 @@ Use this skill when editing this repository's code or docs.
 - Do not describe tools as live-validated unless the live validation docs or tests actually show that.
 - When touching setup or LLM-facing guidance, keep `README.md`, `AGENTS.md`, and `docs/MCP_INSTRUCTIONS.md` consistent.
 - For template-generation work, check `docs/template-generation/IMPLEMENTATION_STATUS.md` before claiming completeness.
+- For editable derivative work, prefer exported preview checkpoints over repeated live screenshots, default preview quality to `checkpoint`, and keep text mutation separate from fitting.
 
 ## Verification
 

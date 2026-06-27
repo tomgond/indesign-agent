@@ -33,6 +33,22 @@ Before broad or destructive edits, inspect first and target objects by stable id
 
 Prefer `labelQuery` for agent-created objects.
 
+Use exported previews for document truth. Use live screen capture only for viewport, focus, or UI diagnosis.
+
+Default preview checkpoints to `previewQuality: "checkpoint"`. Use `review` or `final` only when low-res evidence is ambiguous or user review needs it.
+
+After visible mutation batches, validate with cheap preview evidence plus structured inspection. Object creation alone is not visual success.
+
+Do not run layer debugging by default. Use `diagnose_visual_mismatch` only when preview evidence and structured inspection disagree.
+
+Repair visibility and stacking explicitly with `set_item_layer`, `send_to_back`, or `bring_to_front`.
+
+Use `update_text_slot` only when text content actually changes. Never call it with `fit:true`.
+
+If text fitting is needed, inspect/export first, then call `fit_text_to_frame` separately.
+
+If `fit_text_to_frame` fails once with a runtime or syntax error in a session, avoid `autoFit` and fit-based repair paths for the rest of that session.
+
 ## Geometry
 
 Template bounds use InDesign order:
@@ -75,6 +91,8 @@ Create one derivative page per requested output, using a stable filesystem-safe 
 Reuse the base document's visual DNA. Duplicate useful motifs when appropriate; otherwise recreate them as editable InDesign vector/text/image objects.
 
 Do not flatten the design into a PNG. Do not leave generated mockups as final artwork.
+
+Use one clear layer strategy per derivative. Avoid putting full-page generated backgrounds above source text/motifs unless the layer placement or z-order is explicit.
 
 ## Editable Objects
 

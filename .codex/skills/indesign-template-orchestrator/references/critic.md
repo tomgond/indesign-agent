@@ -30,8 +30,12 @@ If no preview exists, return `re_export_preview`.
 ## Repair Rules
 
 - Prefer one `apply_layout_recipe` for related repairs.
-- Otherwise suggest exact tools such as `set_bounds`, `move_resize_items`, `align_items`, `update_text_slot`, `fit_text_to_frame`, `apply_styles`, `apply_swatches`, `hide_reference_underlay`, `remove_reference_underlay`, or `label_object`.
+- Otherwise suggest exact tools such as `set_bounds`, `move_resize_items`, `align_items`, `update_text_slot`, `fit_text_to_frame`, `diagnose_visual_mismatch`, `set_item_layer`, `apply_styles`, `apply_swatches`, `hide_reference_underlay`, `remove_reference_underlay`, or `label_object`.
 - Do not suggest arbitrary code, rasterizing the final design, deleting large unknown object sets, replacing live text with images, or modifying the original file.
+- Prefer `previewQuality: "checkpoint"` for repair checkpoints unless the low-res preview is ambiguous.
+- If preview and inspection disagree, request `diagnose_visual_mismatch` before recommending text/content changes.
+- Treat text-content changes and fitting as separate operations. Do not recommend `update_text_slot` with `fit:true`.
+- If fitting has already failed with a runtime or syntax error in the session, do not recommend more fit/autoFit paths; recommend geometry or layer repair instead.
 
 ## Verdict Policy
 

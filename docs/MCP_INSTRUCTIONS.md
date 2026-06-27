@@ -100,6 +100,13 @@ Operational endpoints:
 - Keep the UXP-first architecture intact.
 - Keep docs honest about what is locally tested versus live-validated.
 - When changing setup, tool behavior, or validation state, update the matching docs in the same pass.
+- Use exported previews for document truth and keep live screen capture for viewport/focus/UI diagnosis.
+- Default derivative preview checkpoints to `previewQuality: "checkpoint"` and only raise quality for review/final proof.
+- Do not treat object existence as visual success; after visible mutation batches, pair cheap preview evidence with structured inspection.
+- Run `diagnose_visual_mismatch` only when preview evidence and structured inspection disagree materially.
+- Use `set_item_layer` or explicit front/back ordering for layer repairs instead of ad hoc repeated screenshot loops.
+- Use `update_text_slot` only for real text-content changes. Never call `update_text_slot` with `fit:true`; fit separately with `fit_text_to_frame` after inspection.
+- If `fit_text_to_frame` throws a runtime/syntax failure in a live session, avoid `autoFit` and fit-repair loops for the rest of that session and repair via frame geometry instead.
 
 ## Verification
 
