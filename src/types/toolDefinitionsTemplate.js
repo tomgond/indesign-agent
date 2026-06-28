@@ -241,7 +241,7 @@ const derivativeToolDefinitions = [
             resolution: { type: 'number', minimum: 1 },
             overwrite: { type: 'boolean' },
             returnImage: { type: 'boolean', default: true, description: 'Attach an MCP image payload. Default true for export tools; set false when metadata-only preview evidence is enough.' }
-        }, ['derivativeId', 'pageIndex'])
+        }, [], { anyOf: [{ required: ['derivativeId'] }, { required: ['pageIndex'] }] })
     },
     {
         name: 'inspect_derivative',

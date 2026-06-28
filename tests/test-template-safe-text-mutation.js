@@ -33,6 +33,12 @@ assert.match(source, /threaded\/shared/);
 assert.match(source, /isolatedOnly/);
 assert.match(source, /resolved:\s*after\.overset\s*===\s*false/);
 assert.match(source, /stillOverset:\s*after\.overset\s*===\s*true/);
+assert.match(source, /const explicitOldExcerpt = options && options\.expectedOldTextExcerpt != null/);
+assert.match(source, /const oldExcerptCheck = explicitOldExcerpt/);
+assert.match(source, /const oldExcerptRequiredGone = !!oldExcerptCheck && nextText\.indexOf\(oldExcerptCheck\) === -1/);
+assert.match(source, /const newTextPrefixOk = after\.frameExcerpt === requestedPrefix \|\| requestedPrefix === after\.frameExcerpt/);
+assert.match(source, /replacementVerified = newTextPrefixOk && oldGoneOk/);
+assert.doesNotMatch(source, /options && options\.expectedOldTextExcerpt != null \? String\(options\.expectedOldTextExcerpt\) : oldFrameExcerpt/);
 
 assert.equal(byName.get('update_text_slot').inputSchema.properties.textReplacePolicy.default, 'isolatedOnly');
 assert.equal(byName.get('fit_text_to_frame').inputSchema.properties.allowThreadedText.default, false);
