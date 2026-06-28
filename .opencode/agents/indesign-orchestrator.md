@@ -63,6 +63,10 @@ Non-negotiable rules:
 8. Do not claim final completion without `run_derivative_checks` and either `verify_template_roundtrip` or `finalize_derivative`.
 9. Do not use `execute_indesign_code` for normal template generation.
 10. Do not parallelize InDesign mutations. The bridge is serialized; parallelism is only for reasoning and review.
+11. Treat exported previews as document/export/layout truth, structured inspection as object/layer/text/geometry truth, and screenshots as viewport/focus/UI diagnosis only.
+12. Before planning a derivative from an existing page, require a source/base-page checkpoint preview and use it as the visual anchor.
+13. Pick one explicit layer strategy before building and do not place full-page backgrounds above source text, source motifs, or duplicated content.
+14. If one or two targeted repairs do not improve the preview, or known-good text becomes uncertain, rollback or replan instead of compounding salvage edits.
 
 Preferred MCP tools:
 
@@ -101,6 +105,7 @@ Preview and review:
 * `export_spread_preview`
 * `export_derivative_preview`
 * `return_preview_as_image`
+* `diagnose_visual_mismatch`
 * `record_visual_review`
 * `list_visual_reviews`
 * `compare_derivative_state`
@@ -140,6 +145,7 @@ Lower-level tools only when needed:
 * `fit_frame_to_content`
 * `group_items`
 * `ungroup_items`
+* `set_item_layer`
 * `bring_to_front`
 * `send_to_back`
 * `rename_page_item`
@@ -258,6 +264,13 @@ required_output:
 Wait for its result. If the inspector reports blockers, resolve them before planning.
 
 Phase 3: plan
+
+Require the plan to name:
+
+* the source/base-page preview anchor
+* the chosen layer strategy
+* preview checkpoints after each visible mutation batch
+* the rebuild threshold if mismatch repair fails
 
 Delegate to `indesign-design-planner`.
 

@@ -24,6 +24,14 @@ Convert user goals and inspection evidence into a practical MCP execution plan t
 
 Require `inspect_page_geometry` evidence before placing objects on a page.
 
+Before planning a derivative from an existing/source page, require:
+
+- working-copy validation
+- source/base-page geometry and key-object inspection
+- a source/base-page checkpoint preview used as the visual anchor
+- explicit notes on which visible motifs/text are preserved from the source
+- one explicit layer strategy for the derivative
+
 ## Plan Requirements
 
 Every derivative plan should define:
@@ -37,6 +45,7 @@ Every derivative plan should define:
 - preview and inspection checkpoints
 - derivative checks
 - roundtrip or finalization expectations
+- rollback/rebuild threshold when salvage would exceed one or two targeted repairs
 
 Every generated object should include:
 
@@ -56,6 +65,9 @@ Reject your own plan if it:
 - places bounds without page-geometry evidence
 - assumes fonts, styles, or swatches that inspection did not confirm
 - mutates the original file
+- relies only on copied object IDs or item counts instead of source preview plus inspection
+- places full-page backgrounds without an explicit behind-content strategy
+- assumes `autoFit` or text mutation is a normal geometry repair path
 
 ## Output Requirements
 

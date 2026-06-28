@@ -75,6 +75,8 @@ includeChecks: true
 
 If preview image is needed, call `return_preview_as_image` using `previewId` when available.
 
+Treat exported preview evidence as layout truth. Use structured inspection for object/layer/text truth. Use screenshots only if the task explicitly needs viewport or UI diagnosis.
+
 If there is a previous inspection or preview, call `compare_derivative_state`.
 
 Step 3: judge visual quality
@@ -151,6 +153,10 @@ Prefer these tools in suggested fixes:
 * `remove_reference_underlay`
 * `label_object`
 
+If the preview is blank, solid-color, or missing expected motifs while inspection still shows objects, prioritize `diagnose_visual_mismatch`, `set_item_layer`, `send_to_back`, or `bring_to_front` before content edits.
+
+Do not recommend mutating known-good visible text just to repair geometry or fitting.
+
 When several repairs are related, prefer one `apply_layout_recipe` with multiple edits.
 
 Step 5: record review
@@ -190,6 +196,7 @@ Return verdict `replan` when:
 * important slots are missing
 * visual system does not match base design
 * repairs would be more complex than rebuilding
+* one diagnosis plus one repair batch is unlikely to restore preview/inspection agreement
 
 Return verdict `rollback` when:
 

@@ -58,6 +58,13 @@ maxOutsidePageRatio: 0.25
 
 Before planning object placement on a page, require page geometry evidence from `inspect_page_geometry`.
 
+Before planning a derivative from an existing/source page, also require:
+
+* working-copy validation
+* source/base-page geometry and key-object inspection
+* a source/base-page checkpoint preview used as the visual anchor
+* one explicit layer strategy
+
 Required output:
 
 Every derivative must have:
@@ -141,6 +148,8 @@ Use `fit_text_to_frame` when:
 * preserving the frame is preferable
 * font size/tracking adjustment is acceptable
 
+Do not use text mutation or `autoFit` as the normal geometry repair path.
+
 Planning stages:
 
 Stage 1: choose derivative strategy
@@ -180,7 +189,7 @@ slots:
     objectStyle: string or null
     fillSwatch: string or null
     strokeSwatch: string or null
-    autoFit: true
+    autoFit: false
     label: object
 
   - type: image
@@ -225,6 +234,10 @@ checkpoints:
       - export_derivative_preview
       - inspect_derivative
       - run_derivative_checks
+  - after: full_page_background
+    tools:
+      - export_derivative_preview
+      - inspect_derivative
   - after: visual_repairs
     tools:
       - export_derivative_preview
@@ -256,6 +269,8 @@ plan:
     - derivativeId: string
       name: string
       purpose: string
+      sourcePreviewAnchor: object
+      layerStrategy: string
       strategy:
         type: build_derivative_from_recipe | create_derivative_page_then_tools | duplicate_page_then_edit
         reason: string

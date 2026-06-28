@@ -62,7 +62,11 @@ try {
     assert.equal(templateToolDefinitions.find((tool) => tool.name === 'export_derivative_preview').inputSchema.properties.previewQuality.default, 'checkpoint');
     assert.equal(templateToolDefinitions.find((tool) => tool.name === 'export_page_preview').inputSchema.properties.previewQuality.default, 'checkpoint');
     assert.equal(templateToolDefinitions.find((tool) => tool.name === 'export_spread_preview').inputSchema.properties.previewQuality.default, 'checkpoint');
+    assert.equal(templateToolDefinitions.find((tool) => tool.name === 'export_page_preview').inputSchema.properties.returnImage.default, true);
+    assert.equal(templateToolDefinitions.find((tool) => tool.name === 'export_spread_preview').inputSchema.properties.returnImage.default, true);
+    assert.equal(templateToolDefinitions.find((tool) => tool.name === 'return_preview_as_image').inputSchema.properties.returnImage.default, false);
     assert.match(String(templateToolDefinitions.find((tool) => tool.name === 'update_text_slot').inputSchema.properties.fit.description), /deprecated|reject/i);
+    assert.match(String(templateToolDefinitions.find((tool) => tool.name === 'create_text_slot').inputSchema.properties.autoFit.description), /risky|avoid|instability/i);
 
     assert.deepEqual(resolvePreviewExportSettings({}), { previewQuality: 'checkpoint', resolution: 48 });
     assert.deepEqual(resolvePreviewExportSettings({ previewQuality: 'review' }), { previewQuality: 'review', resolution: 96 });

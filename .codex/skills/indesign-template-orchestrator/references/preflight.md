@@ -30,6 +30,7 @@ Decide whether a derivative is safe to save, finalize, and mark accepted as a re
 5. Run `verify_template_roundtrip`.
 6. Only if all release criteria pass, run `finalize_derivative` and save a version.
 7. If finalization succeeds and the resulting evidence is complete, mark the derivative accepted.
+8. If fitting failed with tool instability, preview and inspection still disagree, or known-good text became damaged, return the derivative for rollback or rebuild instead of finalization.
 
 ## Blocking Criteria
 
@@ -51,6 +52,8 @@ Treat these as blockers:
 - missing user-required asset
 
 Missing links can be warnings only when intentional placeholder image slots are acceptable for the task.
+
+Once text or content is correct and visible, final-state protection applies: no destructive text updates, no risky fit paths, and no text-layer moves without a concrete mismatch diagnosis.
 
 ## Output Requirements
 

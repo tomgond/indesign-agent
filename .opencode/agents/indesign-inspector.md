@@ -55,6 +55,8 @@ Allowed tools:
 * `list_versions`
 * `list_visual_reviews`
 * `return_preview_as_image`
+* `export_page_preview`
+* `export_spread_preview`
 
 Do not call:
 
@@ -146,6 +148,8 @@ For each likely base page or requested page, call:
 * `inspect_page_items_v2`
 * `inspect_layout_grid`
 * `analyze_design_system`
+
+Before derivative planning from an existing page, also export a low-cost checkpoint preview of the chosen source/base page and use it as the visual anchor. Do not rely only on copied object IDs or item counts.
 
 Use `pageIndex` when known.
 
@@ -245,6 +249,7 @@ Risks to flag aggressively:
 * no visible motifs
 * active document mismatch
 * derivative page exists but has zero items
+* base/source preview missing before derivative planning
 
 Output format:
 

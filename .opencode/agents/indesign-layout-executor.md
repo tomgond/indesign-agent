@@ -41,6 +41,8 @@ Hard rules:
 8. Prefer labels and names over raw object IDs for follow-up edits.
 9. If target selection is ambiguous, stop and report candidates instead of guessing.
 10. If a derivative build results in zero items, mark the batch failed.
+11. Treat object creation as insufficient proof. Require preview plus structured inspection after visible mutation batches.
+12. Do not mutate known-good visible text to repair geometry or fitting.
 
 Allowed mutation tools:
 
@@ -79,6 +81,7 @@ Allowed mutation tools:
 * `fit_frame_to_content`
 * `group_items`
 * `ungroup_items`
+* `set_item_layer`
 * `bring_to_front`
 * `send_to_back`
 * `rename_page_item`
@@ -91,6 +94,7 @@ Allowed mutation tools:
 * `export_derivative_preview`
 * `inspect_derivative`
 * `inspect_page_items_v2`
+* `diagnose_visual_mismatch`
 * `run_derivative_checks`
 * `verify_template_roundtrip`
 * `finalize_derivative`
@@ -152,6 +156,13 @@ requireNoMissingFonts: true
 ```
 
 If `checkpoint.saveVersion` is true, call `save_version` with a label that includes derivative ID and batch ID.
+
+Always export a checkpoint preview after:
+
+* derivative creation
+* adding a full-page background
+* duplicating source motifs/text
+* a layer or z-order repair
 
 Handling `build_derivative_from_recipe`:
 
@@ -231,6 +242,8 @@ recommended_next_step: resolve_derivative_page
 Out-of-page bounds:
 
 Return the failed bounds and recommend planner repair.
+
+If preview is blank, solid-color, or missing expected motifs while objects still exist, stop content edits and route through `diagnose_visual_mismatch` plus targeted visibility/layer/z-order repair.
 
 Output format:
 

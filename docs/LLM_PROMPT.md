@@ -94,33 +94,41 @@ await tools.call("create_text_frame", {
 });
 ```
 
-### Visual Verification (Screenshot-Based Debug Loop)
+### Visual Verification (Exported Preview First)
 
-For agent visual loops, **use `capture_indesign_screen_preview`** instead of export-based tools.
+For derivative generation and layout validation, **use exported previews plus structured inspection as the normal loop**.
 
-**Key rule:** `export_images` is for production/export sanity checks only. A screenshot is the visual truth for debugging layout because it captures the actual InDesign UI state — what the user would see — not a renderer-specific export.
+**Truth model:**
+- Exported preview = document/export/layout truth
+- Structured inspection = object/layer/text/geometry/visibility truth
+- Live screenshot = viewport/focus/UI diagnosis only
 
-**Workflow:**
-1. Call `open_working_copy` to open the current document.
-2. Navigate/zoom to the target page (use `navigate_to_page` + `zoom_to_page`, or let `capture_indesign_screen_preview` handle both).
-3. Call `capture_indesign_screen_preview` with the desired `pageIndex` and `zoomMode`.
-4. Review the screenshot with your vision model.
-5. Inspect actual InDesign objects using `get_page_content_summary` / `list_page_items` before changing geometry.
+**Normal workflow:**
+1. Call `open_working_copy` and validate the working copy.
+2. Inspect the source/base page geometry and key objects.
+3. Export a low-cost source/base-page checkpoint preview and use it as the visual anchor before planning the derivative.
+4. Build or repair in small visible batches.
+5. After each visible batch, export a `checkpoint` preview and compare it with structured inspection before continuing.
 
-**Available tools:**
-- `capture_screen_preview` — Raw OS-level screenshot (PNG). No InDesign interaction. Returns an MCP image by default.
-- `capture_indesign_screen_preview` — Navigate InDesign to a page, optionally zoom, then capture. Returns an MCP image by default.
+**Mismatch workflow:**
+1. If an exported preview is blank, solid-color, or missing expected content, stop content edits.
+2. Inspect object/layer state and run `diagnose_visual_mismatch`.
+3. Repair with the smallest layer/z-order change using tools such as `set_item_layer`, `send_to_back`, or `bring_to_front`.
+4. Export another checkpoint preview before attempting more content mutation.
 
-**`capture_indesign_screen_preview` zoomMode:**
-- `fit_page`: navigate to the page and apply the repo's existing page-fit zoom behavior.
-- `none`: navigate only, preserving current zoom.
-- `fit_spread`: reserved but currently unsupported; the tool returns a clear error.
+**Preview tools:**
+- `export_page_preview` / `export_spread_preview` / `export_derivative_preview` export preview images and return an MCP image by default unless `returnImage: false`.
+- `return_preview_as_image` returns preview metadata by default and only attaches an MCP image when `returnImage: true`.
+
+**Screenshot tools:**
+- `capture_screen_preview` is a raw OS-level screenshot for display diagnostics.
+- `capture_indesign_screen_preview` navigates InDesign, optionally zooms, then captures the UI for viewport/focus checks.
 
 **Important:**
-- Screenshots are OS-level (`screencapture` on macOS, PowerShell+WinForms on Windows, gnome-screenshot/import/grim on Linux). No InDesign export APIs are called.
+- Screenshots are OS-level (`screencapture` on macOS, PowerShell+WinForms on Windows, gnome-screenshot/import/grim on Linux). They do not prove export/layout truth.
 - On macOS, Screen Recording permission may be required for Terminal/the MCP process (System Settings > Privacy & Security > Screen Recording).
 - In headless or remote environments without a display, screenshot tools will return a clear error.
-- When a template workspace is active, output paths must resolve inside workspaceRoot/exports/.
+- When a template workspace is active, exported previews belong under `workspaceRoot/previews/`.
 
 ### Image Placement with Scaling
 

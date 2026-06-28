@@ -49,6 +49,14 @@ All inspection and preview tools should:
 
 Preview tools must additionally validate all output paths through the workspace path jail and write only to `workspaceRoot/previews`.
 
+For derivative-generation agents, the intended truth model is:
+
+- exported preview = document/export/layout truth
+- structured inspection = object/layer/text/geometry/visibility truth
+- live screenshot = viewport/focus/UI diagnosis only
+
+Before planning a derivative from an existing page, validate the working copy, inspect source/base-page geometry and key objects, export a low-cost checkpoint preview of the source/base page, and use that preview as the visual anchor. Do not rely only on copied object IDs or item counts.
+
 ## `inspect_document_bundle`
 
 ### Purpose
@@ -305,7 +313,7 @@ Terminology may vary across InDesign versions (`masterSpreads` vs parent pages).
 8. Export to the preview path.
 9. Read image dimensions/mime type with `imageInfo.js`.
 10. Record preview metadata in `manifest.previews[]`.
-11. Return preview record and, by default, an MCP image response item.
+11. Return preview record and, by default, an MCP image response item unless `returnImage: false`.
 
 Preview record:
 
@@ -342,7 +350,7 @@ Same as `export_page_preview`, but accepts `spreadIndex` and exports the spread 
 1. If `previewId`, load preview record from manifest.
 2. If `path`, validate it is under `workspaceRoot/previews`.
 3. Read the file from disk in Node.
-4. Return an MCP image by default, with metadata and optional legacy base64 only when explicitly requested:
+4. Return preview metadata by default. Attach an MCP image only when `returnImage: true`, with optional legacy base64 only when explicitly requested:
 
 ```json
 {
@@ -367,7 +375,7 @@ Same as `export_page_preview`, but accepts `spreadIndex` and exports the spread 
 - Preview export rejects path separators and `../` in `outputName`.
 - Preview export appends the requested extension when `outputName` is missing one and rejects mismatched extensions.
 - Preview export refuses overwrite unless requested.
-- `return_preview_as_image` rejects paths outside previews and returns an MCP image response by default.
+- `return_preview_as_image` rejects paths outside previews and returns an MCP image only when `returnImage: true`.
 - `manifest.previews[]` is the canonical preview registry for lookup.
 
 ## Acceptance criteria

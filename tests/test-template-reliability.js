@@ -25,7 +25,10 @@ assert.notDeepEqual(
 
 assert.equal(byName.get('set_item_layer').inputSchema.properties.layerName.minLength, 1);
 assert.equal(byName.get('return_preview_as_image').inputSchema.properties.returnImage.default, false);
+assert.equal(byName.get('export_page_preview').inputSchema.properties.returnImage.default, true);
+assert.equal(byName.get('export_spread_preview').inputSchema.properties.returnImage.default, true);
 assert.equal(byName.get('export_derivative_preview').inputSchema.properties.previewQuality.default, 'checkpoint');
+assert.match(String(byName.get('create_text_slot').inputSchema.properties.autoFit.description), /risky|avoid|instability/i);
 
 assert.deepEqual(resolvePreviewExportSettings({}), { previewQuality: 'checkpoint', resolution: 48 });
 assert.deepEqual(resolvePreviewExportSettings({ previewQuality: 'checkpoint' }), { previewQuality: 'checkpoint', resolution: 48 });

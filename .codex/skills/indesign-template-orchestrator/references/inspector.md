@@ -50,9 +50,10 @@ When using `return_preview_as_image`, request inline image payloads only when ne
 2. Inspect the document bundle with `includeHidden: false` and `includeTextExcerpt: true`.
 3. Inspect styles, swatches, layers, and parent pages to identify reusable design-system resources.
 4. For likely base pages, inspect geometry, page items, layout grid, and design-system hints.
-5. Discover semantic objects through names and labels when useful.
-6. When a preview is blank, solid, or missing expected objects while inspection still shows structure, run `diagnose_visual_mismatch` once and report the likely causes.
-7. Flag blockers aggressively: active-document mismatch, missing workspace, missing links or fonts, overset text, locked layers, raster-only base design, or zero-item derivative pages.
+5. Before planning a derivative from an existing page, export a low-cost checkpoint preview of the chosen source/base page and use that preview as the visual anchor.
+6. Discover semantic objects through names and labels when useful.
+7. When a preview is blank, solid, or missing expected objects while inspection still shows structure, run `diagnose_visual_mismatch` once and report the likely causes.
+8. Flag blockers aggressively: active-document mismatch, missing workspace, missing links or fonts, overset text, locked layers, raster-only base design, or zero-item derivative pages.
 
 ## Output Requirements
 

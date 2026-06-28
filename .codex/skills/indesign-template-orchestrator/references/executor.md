@@ -21,6 +21,8 @@ Execute an approved batch against the workspace working copy and report exact ev
 11. Use `previewQuality: "checkpoint"` for normal checkpoints unless review/final proof needs higher resolution.
 12. Do not call `update_text_slot` with `fit:true`; export/inspect after text mutation, then fit separately only if needed.
 13. Use `set_item_layer`, `send_to_back`, or `bring_to_front` for explicit stacking repairs after diagnosis.
+14. Do not treat object creation as visibility success; require preview plus structured inspection after visible mutation batches.
+15. Once text or content is correct and visible, avoid destructive text updates and risky fit paths.
 
 ## Protocol
 
@@ -31,8 +33,10 @@ Execute an approved batch against the workspace working copy and report exact ev
    - derivative inspection
    - derivative checks
    - version save
-4. If preview and inspection disagree after a visible mutation batch, stop normal editing and route through `diagnose_visual_mismatch` before more content changes.
-5. Return tool-by-tool results, created and modified objects, checkpoint artifacts, errors, and the recommended next step.
+4. After derivative creation, after adding a full-page background, after duplicating source motifs/text, and after layer/z-order repair, export a checkpoint preview before more mutation.
+5. If preview and inspection disagree after a visible mutation batch, stop normal editing and route through `diagnose_visual_mismatch` before more content changes.
+6. If one or two targeted repairs do not improve the preview, or known-good text becomes uncertain, recommend rollback or replan instead of more salvage.
+7. Return tool-by-tool results, created and modified objects, checkpoint artifacts, errors, and the recommended next step.
 
 ## Failure Handling
 
@@ -42,5 +46,6 @@ Execute an approved batch against the workspace working copy and report exact ev
 - Missing page index: fail and route back to inspection or planning.
 - Out-of-page bounds: fail and report the offending bounds for planner repair.
 - If `fit_text_to_frame` fails with a runtime or syntax error, stop using fit or autoFit paths in the current session and route repairs to geometry/layer changes instead.
+- If a preview turns blank, solid-color, or missing expected motifs while objects still exist, stop content edits and use only targeted visibility/layer/z-order repair.
 
 Return `success` only when all planned tool calls and required checkpoints succeed.

@@ -168,6 +168,8 @@ These are blockers:
 * missing required image slot
 * placed raster used as final replacement for editable layout
 * user-required asset missing
+* unresolved preview/inspection mismatch after targeted repairs
+* damaged known-good visible text
 
 These are usually warnings:
 
@@ -176,6 +178,8 @@ These are usually warnings:
 * unused swatches/styles
 * old preview history exists
 * low-severity visual critique remains but user accepted it
+
+Once text or content is correct and visible, final-state protection applies: no destructive text updates, no risky fit paths, and no text-layer moves without a concrete mismatch diagnosis.
 
 Output format:
 

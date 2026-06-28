@@ -36,10 +36,12 @@ Coordinate real editable InDesign document construction through the MCP server:
 9. Do not use `execute_indesign_code` for normal template generation.
 10. Do not parallelize InDesign mutations through the bridge.
 11. Use low-cost preview checkpoints by default: `previewQuality: "checkpoint"`.
-12. Prefer exported previews for document truth; use live screenshots only for viewport or UI diagnosis.
+12. Prefer exported previews for document truth, structured inspection for object/layer/text/geometry truth, and live screenshots only for viewport or UI diagnosis.
 13. Do not run layer debugging by default. Use `diagnose_visual_mismatch` only on preview/inspection contradiction.
 14. Never call `update_text_slot` with `fit:true`; treat content mutation and fitting as separate steps.
 15. If `fit_text_to_frame` fails with a runtime or syntax error in a session, avoid fit/autoFit repair paths for the rest of that session.
+16. Preserve known-good text before risky edits and do not use text mutation for geometry repair.
+17. If one or two targeted repairs fail to improve the page, rollback/replan instead of compounding salvage edits.
 
 ## Workflow
 
@@ -99,6 +101,12 @@ Load [references/executor.md](references/executor.md) and run one derivative or 
 - Export preview and inspect after the batch when required.
 - Use `checkpoint` previews for normal mutation batches and only raise preview quality for review/final proof.
 - If a page looks blank, solid, or missing expected motifs while inspection still shows objects, run `diagnose_visual_mismatch` before changing content.
+- Pick one explicit layer strategy before a derivative build:
+  - generated objects on `AGENT_WORK` with backgrounds behind foreground content
+  - duplicated source motifs/text on a known target layer with generated background behind them
+  - source layers untouched with only safe editable overlays
+- Do not place full-page backgrounds above source text, source motifs, or duplicated content.
+- After visible mutation batches, require preview plus structured inspection agreement before continuing.
 
 ### 5. Critique
 
@@ -108,6 +116,7 @@ Load [references/critic.md](references/critic.md) after preview export.
 - If the verdict is `replan` or two repair loops fail, return to planning instead of compounding edits.
 - Do not claim visual quality without preview evidence.
 - If one diagnosis plus one repair batch does not resolve a preview/inspection mismatch, replan or rebuild instead of compounding salvage edits.
+- If known-good text became damaged or fitting failed with tool instability, prefer rollback/rebuild over more salvage edits.
 
 ### 6. Preflight And Finalize
 
@@ -121,6 +130,7 @@ Load [references/preflight.md](references/preflight.md) once the derivative is v
 - Require roundtrip verification before release.
 - Finalize and save a version only when release criteria pass.
 - Treat multiple independent failures as a salvage threshold: unresolved preview mismatch, fitting runtime failure, damaged known-good copy, or two repair batches that worsen the page should trigger rollback/replan instead of more patching.
+- Once text or content is correct and visible, avoid destructive text updates, risky fit paths, or unnecessary text-layer moves.
 
 ## Role Boundaries
 

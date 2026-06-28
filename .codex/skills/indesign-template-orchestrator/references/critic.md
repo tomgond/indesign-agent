@@ -36,6 +36,9 @@ If no preview exists, return `re_export_preview`.
 - If preview and inspection disagree, request `diagnose_visual_mismatch` before recommending text/content changes.
 - Treat text-content changes and fitting as separate operations. Do not recommend `update_text_slot` with `fit:true`.
 - If fitting has already failed with a runtime or syntax error in the session, do not recommend more fit/autoFit paths; recommend geometry or layer repair instead.
+- If the preview is blank, solid-color, or missing expected motifs while objects still exist, prioritize layer/visibility/occlusion diagnosis before content edits.
+- Do not recommend mutating known-good visible text just to repair geometry or fitting.
+- If one diagnosis plus one repair batch is unlikely to improve the page, recommend replan or rollback rather than compounding salvage edits.
 
 ## Verdict Policy
 
