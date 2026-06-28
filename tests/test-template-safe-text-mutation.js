@@ -36,9 +36,12 @@ assert.match(source, /stillOverset:\s*after\.overset\s*===\s*true/);
 assert.match(source, /const explicitOldExcerpt = options && options\.expectedOldTextExcerpt != null/);
 assert.match(source, /const oldExcerptCheck = explicitOldExcerpt/);
 assert.match(source, /const oldExcerptRequiredGone = !!oldExcerptCheck && nextText\.indexOf\(oldExcerptCheck\) === -1/);
-assert.match(source, /const newTextPrefixOk = after\.frameExcerpt === requestedPrefix \|\| requestedPrefix === after\.frameExcerpt/);
+assert.match(source, /nextText\.length === 0 \? observedExcerpt\.length === 0 : observedExcerpt\.length > 0 && requestedExcerpt\.startsWith\(observedExcerpt\)/);
 assert.match(source, /replacementVerified = newTextPrefixOk && oldGoneOk/);
 assert.doesNotMatch(source, /options && options\.expectedOldTextExcerpt != null \? String\(options\.expectedOldTextExcerpt\) : oldFrameExcerpt/);
+assert.doesNotMatch(source, /excerptText\(nextText,\s*after\.frameExcerpt\.length\)/);
+assert.match(source, /observedExcerpt\.length > 0/);
+assert.match(source, /nextText\.length === 0/);
 
 assert.equal(byName.get('update_text_slot').inputSchema.properties.textReplacePolicy.default, 'isolatedOnly');
 assert.equal(byName.get('fit_text_to_frame').inputSchema.properties.allowThreadedText.default, false);
