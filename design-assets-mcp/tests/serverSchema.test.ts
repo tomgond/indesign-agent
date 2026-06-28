@@ -22,6 +22,10 @@ describe('server schema', () => {
   });
 
   it('includes the required input fields', () => {
+    expect(definition('materialize_asset').inputSchema.required).toContain('candidate');
+    expect(definition('materialize_asset').inputSchema.properties.candidate).toBeDefined();
+    expect(definition('materialize_asset').inputSchema.properties.candidateId).toBeUndefined();
+    expect(definition('materialize_asset').inputSchema.anyOf).toBeUndefined();
     expect(definition('search_assets').inputSchema.properties.allowRemote).toBeDefined();
     expect(definition('generate_vector_asset').inputSchema.properties.maxCostUsd).toBeDefined();
     expect(definition('generate_vector_asset').inputSchema.properties.force).toBeDefined();

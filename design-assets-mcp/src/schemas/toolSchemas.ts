@@ -11,8 +11,7 @@ export const searchAssetsInputSchema = z.object({
 });
 
 export const materializeAssetInputSchema = z.object({
-  candidateId: z.string().optional(),
-  candidate: z.record(z.string(), z.unknown()).optional(),
+  candidate: z.record(z.string(), z.unknown()),
   outputEncoding: z.enum(['svgText', 'base64']).optional(),
   includePreview: z.boolean().optional(),
   maxSvgBytes: z.number().int().positive().optional()

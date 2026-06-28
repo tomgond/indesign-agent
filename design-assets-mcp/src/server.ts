@@ -38,14 +38,13 @@ export const toolDefinitions: any[] = [
   },
   {
     name: 'materialize_asset',
-    description: 'Resolve a candidate into a sanitized AssetPayload that the Mac-side materialize_inline_svg_asset tool can consume.',
+    description: 'Pass a candidate object returned by search_assets or an explicit candidate containing svgText. Resolves to a sanitized AssetPayload that the Mac-side materialize_inline_svg_asset tool can consume.',
     inputSchema: schema({
-      candidateId: { type: 'string' },
       candidate: { type: 'object', additionalProperties: true },
       outputEncoding: { type: 'string', enum: ['svgText', 'base64'] },
       includePreview: { type: 'boolean' },
       maxSvgBytes: { type: 'integer', minimum: 1 }
-    }, [], { anyOf: [{ required: ['candidateId'] }, { required: ['candidate'] }] })
+    }, ['candidate'])
   },
   {
     name: 'preview_asset',

@@ -28,7 +28,7 @@ export async function materializeAsset(input: unknown, options: { includePreview
   }
 
   try {
-    const candidate = parsed.data.candidate ?? {};
+    const candidate = parsed.data.candidate;
     const svgText = resolveCandidate(candidate);
     const sanitized = sanitizeSvg(svgText);
     const sha256 = bytesSha256(Buffer.from(sanitized.svgText, 'utf8'));
