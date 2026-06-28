@@ -29,6 +29,7 @@ describe('server schema', () => {
     expect(definition('search_assets').inputSchema.properties.allowRemote).toBeDefined();
     expect(definition('generate_vector_asset').inputSchema.properties.maxCostUsd).toBeDefined();
     expect(definition('generate_vector_asset').inputSchema.properties.force).toBeDefined();
+    expect(definition('generate_vector_asset').inputSchema.properties.size).toBeDefined();
     expect(definition('preview_asset').inputSchema.properties.svgText).toBeDefined();
     expect(definition('preview_asset').inputSchema.properties.svgBase64).toBeDefined();
     expect(definition('vectorize_raster_asset').inputSchema.properties.inputPath).toBeDefined();

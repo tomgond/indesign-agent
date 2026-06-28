@@ -6,7 +6,7 @@ Linux-side MCP server for design assets. It runs over stdio and owns provider ac
 
 - Search local Tabler and installed Iconify collections.
 - Materialize sanitized asset payloads for the Mac-side `materialize_inline_svg_asset` tool.
-- Optionally generate vector assets through Recraft.
+- Optionally generate vector assets through Recraft's vector endpoint, then sanitize the returned SVG before handing it to the Mac-side materializer.
 - Optionally vectorize raster inputs with VTracer.
 
 ## Run

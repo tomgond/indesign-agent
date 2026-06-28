@@ -15,7 +15,7 @@ This is not the old AppleScript server. Do not assume temp JSX files, AppleScrip
 
 For design assets, keep provider calls and heavy vectorization on Linux. The Mac-side MCP should only materialize already-sanitized inline SVG/base64 into `workspace/assets/imports/` and pass the resulting local file path to existing placement tools. In template mode, use `create_image_slot` or `replace_image_in_frame` for placement; `place_file_on_page` is only in the generic/all profiles. The materializer is covered by local unit tests in this repo, but this change does not claim live Mac/InDesign validation.
 
-The Linux `design-assets-mcp` package should be treated as the source of truth for remote provider access and asset provenance. Tabler works locally out of the box; extra Iconify collections require explicit packages, and remote Iconify search is discovery-only unless the resolved icon is already available locally. Recraft stays gated by token, `force`, and `maxCostUsd`. VTracer stays Linux-only and returns `VTRACER_UNAVAILABLE` when the binary is missing.
+The Linux `design-assets-mcp` package should be treated as the source of truth for remote provider access and asset provenance. Tabler works locally out of the box; extra Iconify collections require explicit packages, and remote Iconify search is discovery-only unless the resolved icon is already available locally. Recraft stays gated by token, `force`, and `maxCostUsd`, and the vector adapter only accepts sanitized SVG/vector payloads before any Mac-side materialization. VTracer stays Linux-only and returns `VTRACER_UNAVAILABLE` when the binary is missing.
 
 ## Read First
 

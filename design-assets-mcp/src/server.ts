@@ -64,6 +64,7 @@ export const toolDefinitions: any[] = [
       prompt: { type: 'string' },
       style: { type: 'string', enum: ['icon', 'logo', 'vector_illustration', 'digital_illustration', 'any'] },
       aspectRatio: { type: 'string' },
+      size: { type: 'string' },
       model: { type: 'string', enum: ['recraftv4_1_vector', 'recraftv4_vector', 'recraftv3_vector', 'recraftv2_vector'] },
       allowText: { type: 'boolean' },
       negativePrompt: { type: 'string' },

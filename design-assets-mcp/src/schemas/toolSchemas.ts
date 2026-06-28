@@ -31,6 +31,7 @@ export const generateVectorAssetInputSchema = z.object({
   prompt: z.string().min(1),
   style: z.enum(['icon', 'logo', 'vector_illustration', 'digital_illustration', 'any']).optional(),
   aspectRatio: z.string().optional(),
+  size: z.string().optional(),
   model: z.enum(['recraftv4_1_vector', 'recraftv4_vector', 'recraftv3_vector', 'recraftv2_vector']).optional(),
   allowText: z.boolean().optional(),
   negativePrompt: z.string().optional(),
