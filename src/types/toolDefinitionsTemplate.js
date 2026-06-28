@@ -48,6 +48,10 @@ const previewQualitySchema = {
 };
 
 const boundsValidationSchemaProps = {
+    role: {
+        type: 'string',
+        description: 'Semantic object role. Decorative roles may use the looser bleed policy.'
+    },
     rejectOutOfPageBounds: {
         type: 'boolean',
         default: true
@@ -57,6 +61,18 @@ const boundsValidationSchemaProps = {
         minimum: 0,
         maximum: 1,
         default: 0.25
+    },
+    allowBleed: {
+        type: 'boolean',
+        default: false
+    },
+    decorative: {
+        type: 'boolean',
+        default: false
+    },
+    requirePageIntersection: {
+        type: 'boolean',
+        default: true
     }
 };
 
@@ -115,7 +131,7 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'create_derivative_page',
-        description: 'Create a derivative page, sized in points or mm, and record derivative page metadata in the workspace manifest.',
+        description: 'Create a derivative page, sized in points or mm, and record derivative page metadata in the workspace manifest. If duplicateBaseMotifs is set, text frames are skipped or recreated as fresh isolated frames according to textDuplicateMode; raw text duplication is unsafe for editable derivative work.',
         inputSchema: {
             ...schema({
                 derivativeId: { type: 'string' },
@@ -126,6 +142,7 @@ const derivativeToolDefinitions = [
                 unit: unitSchema,
                 basePageIndex: { type: 'integer', minimum: 0 },
                 duplicateBaseMotifs: { type: 'boolean' },
+                textDuplicateMode: { type: 'string', enum: ['skip', 'fresh', 'raw'], default: 'skip' },
                 name: { type: 'string' }
             }, ['derivativeId']),
             anyOf: [{ required: ['pageSize'] }, { required: ['width', 'height'] }]
@@ -133,7 +150,7 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'duplicate_items_to_page',
-        description: 'Duplicate real InDesign page items or groups onto a target page. Prefer sourceLabelQueries over raw ids when deriving motifs.',
+        description: 'Duplicate real InDesign page items or groups onto a target page. Prefer sourceLabelQueries over raw ids when deriving motifs. Raw text frame duplication is unsafe for later editable text; use textDuplicateMode=skip or fresh unless raw is explicitly required for inspection.',
         inputSchema: schema({
             sourceObjectIds: { type: 'array', items: { type: 'integer' } },
             sourceLabelQueries: { type: 'array', items: labelQuerySchema },
@@ -143,12 +160,13 @@ const derivativeToolDefinitions = [
             scale: { type: 'number' },
             renamePrefix: { type: 'string' },
             labelPatch: labelObjectSchema,
-            preserveRelativePositions: { type: 'boolean' }
+            preserveRelativePositions: { type: 'boolean' },
+            textDuplicateMode: { type: 'string', enum: ['skip', 'fresh', 'raw'], default: 'skip' }
         }, ['targetPageIndex'])
     },
     {
         name: 'create_text_slot',
-        description: 'Preferred template text tool. Creates semantic editable text frame with label metadata. Use this instead of generic create_text_frame for derivative templates.',
+        description: 'Preferred template text tool. Creates a fresh isolated editable text frame with label metadata. Use this instead of generic create_text_frame for derivative templates and prefer derivativeId over pageIndex when targeting a derivative page.',
         inputSchema: schema({
             derivativeId: { type: 'string' },
             role: { type: 'string' },
@@ -168,11 +186,11 @@ const derivativeToolDefinitions = [
             label: labelObjectSchema,
             autoFit: { type: 'boolean', description: 'Optional and risky. Off by default; avoid in normal agent flows and stop using it after any fit/runtime instability.' },
             ...boundsValidationSchemaProps
-        }, ['derivativeId', 'role', 'slot', 'pageIndex', 'bounds', 'text'])
+        }, ['role', 'slot', 'bounds', 'text'], { anyOf: [{ required: ['derivativeId'] }, { required: ['pageIndex'] }] })
     },
     {
         name: 'create_image_slot',
-        description: 'Preferred template image tool. Creates semantic editable image frame or placeholder with label metadata.',
+        description: 'Preferred template image tool. Creates a fresh semantic image frame or placeholder with label metadata. Prefer derivativeId over pageIndex when targeting a derivative page.',
         inputSchema: schema({
             derivativeId: { type: 'string' },
             role: { type: 'string' },
@@ -192,11 +210,11 @@ const derivativeToolDefinitions = [
             name: { type: 'string' },
             label: labelObjectSchema,
             ...boundsValidationSchemaProps
-        }, ['derivativeId', 'role', 'slot', 'pageIndex', 'bounds'])
+        }, ['role', 'slot', 'bounds'], { anyOf: [{ required: ['derivativeId'] }, { required: ['pageIndex'] }] })
     },
     {
         name: 'fit_text_to_frame',
-        description: 'Heuristically repair overset text by shrinking type, tightening tracking, and optionally growing the frame. Returns evidence and actions.',
+        description: 'Heuristically reduce overset text by shrinking type, tightening tracking, and optionally growing the frame. Inspect resolved and stillOverset; this does not repair threaded or shared-story corruption.',
         inputSchema: targetedSchema({
             minPointSize: { type: 'number' },
             maxPointSize: { type: 'number' },
@@ -207,7 +225,8 @@ const derivativeToolDefinitions = [
             maxGrowMm: { type: 'number' },
             growAnchor: { type: 'string', enum: ['topLeft', 'center'] },
             maxIterations: { type: 'integer', minimum: 1 },
-            unit: unitSchema
+            unit: unitSchema,
+            allowThreadedText: { type: 'boolean', default: false }
         })
     },
     {
@@ -237,10 +256,11 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'apply_layout_recipe',
-        description: 'Apply multiple deterministic edits to named, labeled, or id-targeted objects on a derivative page.',
+        description: 'Apply multiple deterministic edits to named, labeled, or id-targeted objects on a derivative page. setText uses safe replacement and may reject threaded/shared text frames; use fresh text slots for editable derivative text.',
         inputSchema: schema({
             derivativeId: { type: 'string' },
             mode: { type: 'string', enum: ['fail_fast', 'best_effort'] },
+            allowCrossPageEdit: { type: 'boolean', default: false },
             edits: {
                 type: 'array',
                 items: targetedSchema({
@@ -248,6 +268,9 @@ const derivativeToolDefinitions = [
                     pageIndex: { type: 'integer', minimum: 0 },
                     coordinateSpace: coordinateSpaceSchema,
                     setText: { type: 'string' },
+                    textReplacePolicy: { type: 'string', enum: ['isolatedOnly', 'replaceStory'] },
+                    preserveStyle: { type: 'boolean' },
+                    expectedOldTextExcerpt: { type: 'string' },
                     applyStyle: schema({
                         paragraphStyle: { type: 'string' },
                         characterStyle: { type: 'string' },
@@ -270,18 +293,19 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'align_items',
-        description: 'Deterministically align object bounds without calling native doc.align(). Sizes are preserved.',
+        description: 'Deterministically align object bounds without calling native doc.align(). Sizes are preserved. Prefer derivativeId over pageIndex when aligning within a derivative page.',
         inputSchema: schema({
             objectIds: { type: 'array', minItems: 1, items: { type: 'integer' } },
             mode: { type: 'string', enum: ['left', 'right', 'top', 'bottom', 'centerX', 'centerY'] },
             alignTo: { type: 'string', enum: ['page', 'spread', 'itemsBoundingBox', 'referenceObject'] },
             referenceObjectId: { type: 'integer' },
+            derivativeId: { type: 'string' },
             pageIndex: { type: 'integer', minimum: 0 }
         }, ['objectIds', 'mode', 'alignTo'])
     },
     {
         name: 'distribute_items',
-        description: 'Deterministically distribute object bounds along horizontal or vertical axis, preserving object sizes.',
+        description: 'Deterministically distribute object bounds along horizontal or vertical axis, preserving object sizes. Prefer derivativeId over pageIndex when distributing within a derivative page.',
         inputSchema: schema({
             objectIds: { type: 'array', minItems: 2, items: { type: 'integer' } },
             axis: { type: 'string', enum: ['horizontal', 'vertical'] },
@@ -289,6 +313,7 @@ const derivativeToolDefinitions = [
             within: { type: 'string', enum: ['page', 'spread', 'itemsBoundingBox'], default: 'itemsBoundingBox' },
             fixedSpacing: { type: 'number', minimum: 0 },
             unit: unitSchema,
+            derivativeId: { type: 'string' },
             pageIndex: { type: 'integer', minimum: 0 }
         }, ['objectIds', 'axis'])
     },
@@ -338,11 +363,13 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'update_text_slot',
-        description: 'Update text in a text slot targeted by id, name, or labelQuery. fit=true is deprecated and rejected.',
+        description: 'Safely update text in a text slot targeted by id, name, or labelQuery. fit=true is rejected, and threaded/shared text frames may be refused unless the caller explicitly inspects the frame first.',
         inputSchema: targetedSchema({
             text: { type: 'string' },
             fit: { type: 'boolean', description: 'Deprecated. If true this tool rejects before mutating; call fit_text_to_frame separately.' },
-            preserveStyle: { type: 'boolean' }
+            preserveStyle: { type: 'boolean' },
+            textReplacePolicy: { type: 'string', enum: ['isolatedOnly', 'replaceStory'], default: 'isolatedOnly' },
+            expectedOldTextExcerpt: { type: 'string' }
         }, ['text'])
     },
     {
@@ -413,7 +440,7 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'build_derivative_from_recipe',
-        description: 'Preferred high-level tool for creating one derivative page transactionally. Use this instead of many separate primitive calls when possible.',
+        description: 'Preferred high-level tool for creating one derivative page transactionally. Use this instead of many separate primitive calls when possible. Item bounds can opt into decorative bleed, but text and image slots stay strict by default.',
         inputSchema: {
             ...schema({
                 derivativeId: { type: 'string' },
@@ -425,6 +452,7 @@ const derivativeToolDefinitions = [
                 orientation: { type: 'string', enum: ['portrait', 'landscape'] },
                 basePageIndex: { type: 'integer', minimum: 0 },
                 duplicateBaseMotifs: { type: 'boolean', default: false },
+                textDuplicateMode: { type: 'string', enum: ['skip', 'fresh', 'raw'], default: 'skip' },
                 coordinateSpace: coordinateSpaceSchema,
                 layerName: layerNameSchema,
                 ...boundsValidationSchemaProps,
@@ -454,7 +482,10 @@ const derivativeToolDefinitions = [
                         coordinateSpace: { type: 'string', enum: ['page', 'document'] },
                         layerName: { type: 'string' },
                         rejectOutOfPageBounds: { type: 'boolean' },
-                        maxOutsidePageRatio: { type: 'number', minimum: 0, maximum: 1 }
+                        maxOutsidePageRatio: { type: 'number', minimum: 0, maximum: 1 },
+                        allowBleed: { type: 'boolean' },
+                        decorative: { type: 'boolean' },
+                        requirePageIntersection: { type: 'boolean' }
                     }, ['type'])
                 },
                 edits: { type: 'array', items: { type: 'object', additionalProperties: true } },
@@ -474,13 +505,14 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'move_resize_items',
-        description: 'Batch move/resize objects by targetBox or offset/scale while preserving relative layout when requested.',
+        description: 'Batch move/resize objects by targetBox or offset/scale while preserving relative layout when requested. Prefer derivativeId when moving derivative-scoped objects.',
         inputSchema: schema({
             objectIds: { type: 'array', items: { type: 'integer' } },
             targetBox: boundsSchema,
             offset: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'number' }, description: '[topOffset,leftOffset]' },
             scale: { type: 'number' },
             unit: unitSchema,
+            derivativeId: { type: 'string' },
             pageIndex: { type: 'integer', minimum: 0 },
             coordinateSpace: coordinateSpaceSchema,
             preserveRelativePositions: { type: 'boolean' },
@@ -489,7 +521,7 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'create_vector_motif',
-        description: 'Create a reusable vector motif from primitive shapes and optional grouping.',
+        description: 'Create a reusable vector motif from primitive shapes and optional grouping. Prefer derivativeId over pageIndex; decorative accents can opt into bleed explicitly.',
         inputSchema: schema({
             derivativeId: { type: 'string' },
             pageIndex: { type: 'integer', minimum: 0 },
@@ -514,7 +546,7 @@ const derivativeToolDefinitions = [
             group: { type: 'boolean' },
             label: labelObjectSchema,
             ...boundsValidationSchemaProps
-        }, ['derivativeId', 'pageIndex', 'motifId', 'shapes'])
+        }, ['motifId', 'shapes'], { anyOf: [{ required: ['derivativeId'] }, { required: ['pageIndex'] }] })
     },
     {
         name: 'inspect_layout_grid',
@@ -596,7 +628,7 @@ const primitiveToolDefinitions = [
     { name: 'get_object_label', description: 'Read semantic label JSON from one object.', inputSchema: targetedSchema() },
     { name: 'find_objects_by_label', description: 'Find objects whose semantic labels match a query.', inputSchema: schema({ labelQuery: labelQuerySchema, includeHidden: { type: 'boolean', default: false }, namePrefix: { type: 'string' }, pageIndex: { type: 'integer', minimum: 0 } }, ['labelQuery']) },
     { name: 'list_named_objects', description: 'List named objects, optionally filtered by label query.', inputSchema: schema({ namePrefix: { type: 'string' }, labelQuery: labelQuerySchema, includeHidden: { type: 'boolean', default: false }, pageIndex: { type: 'integer', minimum: 0 } }) },
-    { name: 'create_reference_underlay', description: 'Create a non-printing reference image underlay.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, bounds: boundsSchema, imagePath: { type: 'string', description: 'Path under workspace assets/ or input/.' }, filePath: { type: 'string', description: 'Alias for imagePath under workspace assets/ or input/.' }, unit: unitSchema, coordinateSpace: coordinateSpaceSchema, name: { type: 'string' }, label: labelObjectSchema, layerName: { type: 'string', default: 'REFERENCE_UNDERLAY' }, lockLayer: { type: 'boolean', default: true }, ...boundsValidationSchemaProps }, ['pageIndex', 'bounds'], { anyOf: [{ required: ['pageIndex', 'bounds', 'imagePath'] }, { required: ['pageIndex', 'bounds', 'filePath'] }] }) },
+    { name: 'create_reference_underlay', description: 'Create a non-printing reference image underlay.', inputSchema: schema({ derivativeId: { type: 'string' }, pageIndex: { type: 'integer', minimum: 0 }, bounds: boundsSchema, imagePath: { type: 'string', description: 'Path under workspace assets/ or input/.' }, filePath: { type: 'string', description: 'Alias for imagePath under workspace assets/ or input/.' }, unit: unitSchema, coordinateSpace: coordinateSpaceSchema, name: { type: 'string' }, label: labelObjectSchema, layerName: { type: 'string', default: 'REFERENCE_UNDERLAY' }, lockLayer: { type: 'boolean', default: true }, ...boundsValidationSchemaProps }, ['bounds'], { anyOf: [{ required: ['derivativeId', 'bounds', 'imagePath'] }, { required: ['derivativeId', 'bounds', 'filePath'] }, { required: ['pageIndex', 'bounds', 'imagePath'] }, { required: ['pageIndex', 'bounds', 'filePath'] }] }) },
     { name: 'hide_reference_underlay', description: 'Hide the reference underlay layer.', inputSchema: schema({ layerName: { type: 'string', default: 'REFERENCE_UNDERLAY' } }) },
     { name: 'remove_reference_underlay', description: 'Remove reference underlay items or the whole layer.', inputSchema: schema({ layerName: { type: 'string', default: 'REFERENCE_UNDERLAY' }, removeLayer: { type: 'boolean', default: true } }) },
     { name: 'record_visual_review', description: 'Record visual review notes for a derivative.', inputSchema: schema({ derivativeId: { type: 'string' }, targetPreviewId: { type: 'string' }, indesignPreviewId: { type: 'string' }, brief: { type: 'string', default: '' }, issues: { type: 'array', items: {} }, suggestedFixes: { type: 'array', items: {} } }, ['derivativeId']) },

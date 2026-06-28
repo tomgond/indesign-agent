@@ -42,14 +42,15 @@ After visible mutation batches, validate with cheap preview evidence plus struct
 Do not run layer debugging by default. Use `diagnose_visual_mismatch` only when preview evidence and structured inspection disagree.
 
 Repair visibility and stacking explicitly with `set_item_layer`, `send_to_back`, or `bring_to_front`.
+- Treat `derivativeId` as the durable derivative target. Do not carry raw `pageIndex` forward when a derivative can be resolved again before mutation.
 
 Use `update_text_slot` only when text content actually changes. Never call it with `fit:true`.
 
-Do not use `update_text_slot` as a geometry or fitting repair tool. Preserve a known-good text excerpt before risky edits and do not mutate text that is already correct and visible.
+Do not use `update_text_slot` as a geometry or fitting repair tool. Preserve a known-good text excerpt before risky edits and do not mutate raw duplicated or threaded/shared text frames as normal editable text.
 
-If text fitting is needed, inspect/export first, then call `fit_text_to_frame` separately.
+If text fitting is needed, inspect/export first, then call `fit_text_to_frame` separately and check `resolved` and `stillOverset` on the result.
 
-If `fit_text_to_frame` fails once with a runtime or syntax error in a session, avoid `autoFit` and fit-based repair paths for the rest of that session.
+Decorative bleed is opt-in. Keep normal content slots strict unless a call explicitly sets `allowBleed` or `decorative`.
 
 Once one or two targeted repairs fail to improve the preview, or known-good text/motif preservation becomes uncertain, stop salvage work and rebuild from the source anchor instead.
 

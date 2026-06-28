@@ -106,8 +106,11 @@ Operational endpoints:
 - Do not treat object existence as visual success; after visible mutation batches, pair cheap preview evidence with structured inspection.
 - Run `diagnose_visual_mismatch` only when preview evidence and structured inspection disagree materially.
 - Use `set_item_layer` or explicit front/back ordering for layer repairs instead of ad hoc repeated screenshot loops.
+- Treat `derivativeId` as the durable derivative target. Do not carry raw `pageIndex` from one mutation to the next when `derivativeId` exists; resolve the page again before mutating if identity may have drifted.
 - Use `update_text_slot` only for real text-content changes. Never call `update_text_slot` with `fit:true`; fit separately with `fit_text_to_frame` after inspection.
-- If `fit_text_to_frame` throws a runtime/syntax failure in a live session, avoid `autoFit` and fit-repair loops for the rest of that session and repair via frame geometry instead.
+- Do not edit raw duplicated text frames as normal editable text. Use `create_text_slot` for fresh isolated derivative text, and expect `update_text_slot` to refuse threaded/shared story frames by default.
+- `fit_text_to_frame` is a heuristic only. Check `resolved` and `stillOverset`; it does not repair story/thread corruption.
+- Decorative bleed is explicit. Keep normal content slots strict unless a call sets `allowBleed` or `decorative`.
 
 ## Verification
 

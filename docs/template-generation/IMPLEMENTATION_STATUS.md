@@ -149,6 +149,13 @@ Still pending: live Mac/InDesign retest after deployment and deeper fixture-driv
 - Separated text mutation from fitting by rejecting `update_text_slot({ fit: true })`.
 - Added focused local regressions in `tests/test-template-reliability.js` plus an optional live reliability script: `tests/test-template-reliability-live.js`.
 
+## June 28 derivative reliability pass
+
+- Centralized existing-frame text replacement into a shared safe helper that refuses threaded/shared story frames by default.
+- Added derivative-page resolution helpers so mutating tools prefer durable `derivativeId` resolution over cached `pageIndex`.
+- Made duplicate-base-motif text handling explicit with skip/fresh/raw modes and defaulted derivative base duplication away from raw text reuse.
+- Added decorative bleed opt-in for bounds validation instead of loosening content-slot checks globally.
+
 ## What it takes to finish
 
 1. Use Adobe InDesign UXP DOM docs to map each incomplete tool to exact APIs and enum names.

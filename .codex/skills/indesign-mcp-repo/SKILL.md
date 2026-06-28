@@ -28,6 +28,9 @@ Use this skill for normal repository maintenance in this workspace.
 - When touching setup, tool behavior, or validation status, update the matching docs in the same pass.
 - For template-generation work, check `docs/template-generation/IMPLEMENTATION_STATUS.md` before claiming completeness.
 - For editable derivative work, prefer exported preview checkpoints over repeated live screenshots, default preview quality to `checkpoint`, and keep text mutation separate from fitting.
+- Treat `derivativeId` as the durable target for derivative-scoped mutations. Re-resolve the page before mutating instead of carrying raw `pageIndex` forward.
+- Do not treat duplicated text frames as normal editable text. Use `create_text_slot` for fresh isolated derivative text, and let `fit_text_to_frame` report `resolved` and `stillOverset` instead of assuming a repair.
+- Decorative bleed is explicit. Keep normal content slots strict unless a call opts into `allowBleed` or `decorative`.
 
 ## Verification
 

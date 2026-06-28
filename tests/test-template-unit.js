@@ -52,7 +52,9 @@ try {
 
     const textSlotSchema = templateToolDefinitions.find((tool) => tool.name === 'create_text_slot');
     assert.ok(textSlotSchema, 'create_text_slot schema must exist');
-    assert.deepEqual(textSlotSchema.inputSchema.required, ['derivativeId', 'role', 'slot', 'pageIndex', 'bounds', 'text']);
+    assert.deepEqual(textSlotSchema.inputSchema.required, ['role', 'slot', 'bounds', 'text']);
+    assert.equal(textSlotSchema.inputSchema.anyOf.some((entry) => entry.required?.includes('derivativeId')), true);
+    assert.equal(textSlotSchema.inputSchema.anyOf.some((entry) => entry.required?.includes('pageIndex')), true);
     assert.equal(templateToolDefinitions.find((tool) => tool.name === 'align_items').inputSchema.properties.alignTo.enum.includes('referenceObject'), true);
     assert.ok(templateToolDefinitions.find((tool) => tool.name === 'attach_template_workspace'));
     assert.ok(templateToolDefinitions.find((tool) => tool.name === 'resolve_derivative_page'));
@@ -67,6 +69,7 @@ try {
     assert.equal(templateToolDefinitions.find((tool) => tool.name === 'return_preview_as_image').inputSchema.properties.returnImage.default, false);
     assert.match(String(templateToolDefinitions.find((tool) => tool.name === 'update_text_slot').inputSchema.properties.fit.description), /deprecated|reject/i);
     assert.match(String(templateToolDefinitions.find((tool) => tool.name === 'create_text_slot').inputSchema.properties.autoFit.description), /risky|avoid|instability/i);
+    assert.equal(templateToolDefinitions.find((tool) => tool.name === 'duplicate_items_to_page').inputSchema.properties.textDuplicateMode.default, 'skip');
 
     assert.deepEqual(resolvePreviewExportSettings({}), { previewQuality: 'checkpoint', resolution: 48 });
     assert.deepEqual(resolvePreviewExportSettings({ previewQuality: 'review' }), { previewQuality: 'review', resolution: 96 });

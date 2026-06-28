@@ -33,9 +33,11 @@ The current architecture is UXP-first. Do not reintroduce AppleScript or ExtendS
 - Run `diagnose_visual_mismatch` only when preview evidence and structured inspection materially disagree.
 - Use `set_item_layer` or explicit z-order tools for layer repairs; do not make layer debugging a default loop.
 - Object creation success is not visibility success. Re-check with preview plus structured inspection after visible mutation batches.
+- Use `derivativeId` as the durable target for derivative work. Treat returned `pageIndex` as current evidence, not stable identity, and resolve the derivative page before mutation when a durable target exists.
 - Do not call `update_text_slot` with `fit:true`; change text first, inspect/export, then call `fit_text_to_frame` separately if needed.
-- Do not use `update_text_slot` for geometry or fitting repair. Preserve known-good text before risky edits and do not mutate text that is already correct and visible.
-- If `fit_text_to_frame` fails with a runtime or syntax error in a live session, stop using fit/autoFit paths in that session and repair via frame geometry instead.
+- Do not use `update_text_slot` for geometry or fitting repair. Preserve known-good text before risky edits and do not mutate duplicated or threaded/shared text frames as normal editable text; use `create_text_slot` for fresh isolated derivative text.
+- `fit_text_to_frame` is a heuristic only. Inspect its `resolved` and `stillOverset` fields; it does not fix threaded/story corruption.
+- Decorative bleed is opt-in. Keep normal content slots strict unless a tool call explicitly sets `allowBleed` or `decorative`.
 - If one or two targeted repairs do not improve a preview/inspection mismatch, or known-good text becomes uncertain, rollback/replan instead of compounding salvage edits.
 
 ## Verification

@@ -39,9 +39,11 @@ Coordinate real editable InDesign document construction through the MCP server:
 12. Prefer exported previews for document truth, structured inspection for object/layer/text/geometry truth, and live screenshots only for viewport or UI diagnosis.
 13. Do not run layer debugging by default. Use `diagnose_visual_mismatch` only on preview/inspection contradiction.
 14. Never call `update_text_slot` with `fit:true`; treat content mutation and fitting as separate steps.
-15. If `fit_text_to_frame` fails with a runtime or syntax error in a session, avoid fit/autoFit repair paths for the rest of that session.
-16. Preserve known-good text before risky edits and do not use text mutation for geometry repair.
-17. If one or two targeted repairs fail to improve the page, rollback/replan instead of compounding salvage edits.
+15. Treat `derivativeId` as the durable derivative target. Do not carry raw `pageIndex` forward when a page can be resolved again before mutation.
+16. If `fit_text_to_frame` is needed, inspect the result fields and do not treat it as a story/thread repair.
+17. Preserve known-good text before risky edits and do not use text mutation for geometry repair. Raw duplicated or threaded/shared text frames are not normal editable text.
+18. Decorative bleed is opt-in. Keep normal content slots strict unless a call explicitly sets `allowBleed` or `decorative`.
+19. If one or two targeted repairs fail to improve the page, rollback/replan instead of compounding salvage edits.
 
 ## Workflow
 
