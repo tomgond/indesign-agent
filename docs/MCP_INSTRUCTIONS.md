@@ -13,7 +13,7 @@ Current architecture:
 
 This is not the old AppleScript server. Do not assume temp JSX files, AppleScript automation, or macOS-only behavior.
 
-For design assets, keep provider calls and heavy vectorization on Linux. The Mac-side MCP should only materialize already-sanitized inline SVG/base64 into `workspace/assets/imports/` and pass the resulting local file path to existing placement tools.
+For design assets, keep provider calls and heavy vectorization on Linux. The Mac-side MCP should only materialize already-sanitized inline SVG/base64 into `workspace/assets/imports/` and pass the resulting local file path to existing placement tools. In template mode, use `create_image_slot` or `replace_image_in_frame` for placement; `place_file_on_page` is only in the generic/all profiles. The materializer is covered by local unit tests in this repo, but this change does not claim live Mac/InDesign validation.
 
 ## Read First
 

@@ -1,0 +1,29 @@
+{
+  "name": "design-assets-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@iconify-json/tabler": "^1.2.35",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@resvg/resvg-js": "^2.6.2",
+    "css-tree": "^3.2.1",
+    "fast-xml-parser": "^5.9.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.130",
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

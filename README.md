@@ -59,7 +59,7 @@ Claude / MCP Client
 
 The UXP plugin maintains a persistent WebSocket connection to the bridge. When a tool is called, the handler sends a JS code string to the bridge, which forwards it to the plugin. The plugin runs it as `new Function('app', 'return (async () => { CODE })()')` and returns the result as JSON.
 
-For design assets, the Mac-side MCP stays file-bound: `materialize_inline_svg_asset` writes already-sanitized SVG/base64 payloads into `workspace/assets/imports/<assetKey>/asset.svg`, and `place_file_on_page` places that local file path on the page.
+For design assets, the Mac-side MCP stays file-bound: `materialize_inline_svg_asset` writes already-sanitized SVG/base64 payloads into `workspace/assets/imports/<assetKey>/asset.svg`. In template mode, place the returned path with `create_image_slot` or `replace_image_in_frame`; `place_file_on_page` is only available in the generic/all tool profiles.
 
 ---
 
@@ -161,6 +161,13 @@ Live pass/fail details are tracked in [docs/live-mcp-validation.md](docs/live-mc
 
 ### Asset Import
 `materialize_inline_svg_asset`
+
+### Asset Flow Notes
+- `materialize_inline_svg_asset` is a narrow filesystem/materialization step on the Mac side.
+- It performs cheap rejection and workspace confinement only; deep SVG sanitization belongs on the Linux design-assets MCP.
+- The returned `assetPath` is suitable for existing placement tools that accept a local file path.
+- Template mode uses `create_image_slot` or `replace_image_in_frame` for placement; `place_file_on_page` belongs to the generic/all profiles.
+- This Mac-side materialization path is covered by local unit tests here; it has not been live-validated against a Mac/InDesign session in this change.
 
 ### Text & Tables
 `create_text_frame` `edit_text_frame` `create_table` `populate_table` `find_replace_text` `find_text_in_document`
