@@ -13,6 +13,8 @@ Current architecture:
 
 This is not the old AppleScript server. Do not assume temp JSX files, AppleScript automation, or macOS-only behavior.
 
+For design assets, keep provider calls and heavy vectorization on Linux. The Mac-side MCP should only materialize already-sanitized inline SVG/base64 into `workspace/assets/imports/` and pass the resulting local file path to existing placement tools.
+
 ## Read First
 
 - `../README.md`

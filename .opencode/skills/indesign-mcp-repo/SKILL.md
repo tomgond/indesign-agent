@@ -21,6 +21,7 @@ Use this skill when editing this repository's code or docs.
 - Prefer small handler or doc fixes over new abstractions.
 - Do not describe tools as live-validated unless the live validation docs or tests actually show that.
 - When touching setup or LLM-facing guidance, keep `README.md`, `AGENTS.md`, and `docs/MCP_INSTRUCTIONS.md` consistent.
+- For design assets, keep provider/network/heavy work on Linux. The Mac-side MCP should only accept already-sanitized SVG/base64 through `materialize_inline_svg_asset`, write under `workspace/assets/imports/`, and hand the resulting local file path to existing placement tools.
 - For template-generation work, check `docs/template-generation/IMPLEMENTATION_STATUS.md` before claiming completeness.
 - For editable derivative work, treat exported previews as document truth, structured inspection as object/layer/text/geometry truth, use screenshots only for viewport/UI diagnosis, default preview quality to `checkpoint`, and keep text mutation separate from fitting.
 - Treat `derivativeId` as the durable target for derivative-scoped mutations. Re-resolve the page before mutating instead of carrying raw `pageIndex` forward.

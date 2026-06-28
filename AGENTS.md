@@ -22,6 +22,7 @@ The current architecture is UXP-first. Do not reintroduce AppleScript or ExtendS
 
 - Prefer the smallest correct patch.
 - Preserve the Node -> bridge -> UXP plugin execution model.
+- For design assets, keep provider/network/heavy dependencies off the Mac side. The Mac MCP should only accept already-sanitized inline SVG/base64 via `materialize_inline_svg_asset`, write under `workspace/assets/imports/`, and let existing placement tools consume the resulting local file path.
 - Treat live InDesign behavior as unverified until it has been exercised against a real bridge/plugin/InDesign session.
 - Keep docs aligned with the current server architecture and transport.
 - Update docs when changing tool behavior, setup, or validation status.

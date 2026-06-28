@@ -28,6 +28,7 @@ export { ScreenshotHandlers } from './screenshotHandlers.js';
 
 // System and Utility
 export { UtilityHandlers } from './utilityHandlers.js';
+export { AssetHandlers } from './assetHandlers.js';
 export { HelpHandlers } from './helpHandlers.js';
 export { TemplateHandlers } from './templateHandlers.js';
 

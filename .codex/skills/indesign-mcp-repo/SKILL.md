@@ -26,6 +26,7 @@ Use this skill for normal repository maintenance in this workspace.
 - Prefer the smallest correct patch.
 - Keep docs honest about what is locally tested versus live-validated.
 - When touching setup, tool behavior, or validation status, update the matching docs in the same pass.
+- For design assets, keep provider/network/heavy work on Linux. The Mac-side MCP should only accept already-sanitized SVG/base64 through `materialize_inline_svg_asset`, write under `workspace/assets/imports/`, and hand the resulting local file path to existing placement tools.
 - For template-generation work, check `docs/template-generation/IMPLEMENTATION_STATUS.md` before claiming completeness.
 - For editable derivative work, prefer exported preview checkpoints over repeated live screenshots, default preview quality to `checkpoint`, and keep text mutation separate from fitting.
 - Treat `derivativeId` as the durable target for derivative-scoped mutations. Re-resolve the page before mutating instead of carrying raw `pageIndex` forward.

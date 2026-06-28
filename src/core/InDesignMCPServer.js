@@ -13,6 +13,7 @@ import {
     GraphicsHandlers,
     GroupHandlers,
     HelpHandlers,
+    AssetHandlers,
     MasterSpreadHandlers,
     PageHandlers,
     PageItemHandlers,
@@ -50,6 +51,7 @@ const PURE_TEMPLATE_TOOL_NAMES = new Set([
     'get_runtime_logs',
     'get_debug_bundle',
     'compare_derivative_state',
+    'materialize_inline_svg_asset',
 ]);
 const PURE_GENERIC_TOOL_NAMES = new Set([
     'help',
@@ -167,6 +169,9 @@ export class InDesignMCPServer {
 
     async executeTool(name, args) {
         if (activeToolProfile() !== 'generic' && TEMPLATE_TOOL_NAMES.has(name)) {
+            if (name === 'materialize_inline_svg_asset') {
+                return await AssetHandlers.materializeInlineSvgAsset(args);
+            }
             const isPureTemplateTool = PURE_TEMPLATE_TOOL_NAMES.has(name);
             if (!TEMPLATE_BOOTSTRAP_TOOLS.has(name) && !isPureTemplateTool && !this.canLoadTemplateWorkspace()) {
                 return formatErrorResponse(TEMPLATE_WORKSPACE_ERROR, name);

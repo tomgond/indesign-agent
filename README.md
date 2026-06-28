@@ -59,6 +59,8 @@ Claude / MCP Client
 
 The UXP plugin maintains a persistent WebSocket connection to the bridge. When a tool is called, the handler sends a JS code string to the bridge, which forwards it to the plugin. The plugin runs it as `new Function('app', 'return (async () => { CODE })()')` and returns the result as JSON.
 
+For design assets, the Mac-side MCP stays file-bound: `materialize_inline_svg_asset` writes already-sanitized SVG/base64 payloads into `workspace/assets/imports/<assetKey>/asset.svg`, and `place_file_on_page` places that local file path on the page.
+
 ---
 
 ## Prerequisites
@@ -156,6 +158,9 @@ Live pass/fail details are tracked in [docs/live-mcp-validation.md](docs/live-mc
 
 ### Pages & Spreads
 `add_page` `delete_page` `duplicate_page` `move_page` `get_page_info` `set_page_properties` `adjust_page_layout` `resize_page` `reframe_page` `navigate_to_page` `select_page` `zoom_to_page` `set_page_background` `create_page_guides` `place_file_on_page` `place_xml_on_page` `get_page_content_summary` `snapshot_page_layout` `delete_page_layout_snapshot` `delete_all_page_layout_snapshots` `list_spreads` `get_spread_info` `duplicate_spread` `move_spread` `delete_spread` `set_spread_properties` `create_spread_guides` `place_file_on_spread` `place_xml_on_spread` `select_spread` `get_spread_content_summary`
+
+### Asset Import
+`materialize_inline_svg_asset`
 
 ### Text & Tables
 `create_text_frame` `edit_text_frame` `create_table` `populate_table` `find_replace_text` `find_text_in_document`
