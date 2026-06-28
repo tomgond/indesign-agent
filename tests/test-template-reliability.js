@@ -50,4 +50,21 @@ assert.ok(source.includes('static set_item_layer'));
 assert.ok(source.includes('previewQuality: previewSettings.previewQuality'));
 assert.ok(source.includes("if (args.returnImage === true)"));
 
+const setLayerStart = source.indexOf('static set_item_layer');
+assert.ok(setLayerStart >= 0, 'set_item_layer handler missing');
+const idxResolvedItems = source.indexOf('const resolvedItems = ids.map((id) => itemById(id));', setLayerStart);
+const idxLayerAdd = source.indexOf('doc.layers.add', setLayerStart);
+const idxLayerVisible = source.indexOf('targetLayer.visible = true', setLayerStart);
+const idxLayerUnlock = source.indexOf('targetLayer.locked = false', setLayerStart);
+const idxItemLayerMutation = source.indexOf('item.itemLayer = targetLayer', setLayerStart);
+assert.ok(idxResolvedItems !== -1, 'set_item_layer must pre-resolve object IDs');
+assert.ok(idxLayerAdd !== -1, 'set_item_layer layer creation path missing');
+assert.ok(idxLayerVisible !== -1, 'set_item_layer visibility mutation path missing');
+assert.ok(idxLayerUnlock !== -1, 'set_item_layer unlock mutation path missing');
+assert.ok(idxItemLayerMutation !== -1, 'set_item_layer item move path missing');
+assert.ok(idxResolvedItems < idxLayerAdd, 'object IDs must resolve before creating target layer');
+assert.ok(idxResolvedItems < idxLayerVisible, 'object IDs must resolve before changing layer visibility');
+assert.ok(idxResolvedItems < idxLayerUnlock, 'object IDs must resolve before unlocking target layer');
+assert.ok(idxResolvedItems < idxItemLayerMutation, 'object IDs must resolve before moving any item');
+
 console.log('Template reliability tests passed');

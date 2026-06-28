@@ -1569,6 +1569,7 @@ export class TemplateHandlers {
             if (!targetName) throw new Error('layerName is required');
             const ids = Array.isArray(args.objectIds) ? args.objectIds : [];
             if (!ids.length) throw new Error('objectIds are required');
+            const resolvedItems = ids.map((id) => itemById(id));
             let targetLayer = safe(()=>doc.layers.itemByName(targetName), null);
             let createdLayer = false;
             if (!targetLayer || targetLayer.isValid === false) {
@@ -1587,8 +1588,7 @@ export class TemplateHandlers {
             }
             const items = [];
             const overallWarnings = [];
-            for (const id of ids) {
-                const item = itemById(id);
+            for (const item of resolvedItems) {
                 const before = {
                     layerName: safe(()=>item.itemLayer && item.itemLayer.name, null),
                     bounds: clone(safe(()=>item.geometricBounds, null))
