@@ -97,6 +97,7 @@ temp_script.jsx
 # MCP configuration
 .cursor-tools.env
 .cursor-tools.config.json
+opencode.json
 
 # Development artifacts
 *.tmp
