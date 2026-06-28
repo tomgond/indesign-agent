@@ -20,6 +20,7 @@ const priorActiveState = fs.existsSync(activeStatePath) ? fs.readFileSync(active
 fs.writeFileSync(original, 'fake-indd-bytes');
 const templateHandlerSource = fs.readFileSync(new URL('../src/handlers/templateHandlers.js', import.meta.url), 'utf8');
 const originalEnsureTemplateReady = TemplateHandlers.ensureTemplateReady;
+const originalResolveDerivativeTarget = TemplateHandlers.resolveDerivativeTarget;
 const originalExecuteViaUXP = ScriptExecutor.executeViaUXP;
 
 try {
@@ -50,6 +51,14 @@ try {
     assert.equal(derivative.pageIndex, 1);
     assert.deepEqual(derivative.previewIds, []);
 
+    const assetDir = path.join(workspaceRoot, 'assets', 'imports', 'unit-test');
+    const assetPath = path.join(assetDir, 'asset.svg');
+    const outsideAssetPath = path.join(root, 'outside.svg');
+    const svgText = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 12h18"/></svg>';
+    fs.mkdirSync(assetDir, { recursive: true });
+    fs.writeFileSync(assetPath, svgText);
+    fs.writeFileSync(outsideAssetPath, svgText);
+
     const textSlotSchema = templateToolDefinitions.find((tool) => tool.name === 'create_text_slot');
     assert.ok(textSlotSchema, 'create_text_slot schema must exist');
     assert.deepEqual(textSlotSchema.inputSchema.required, ['role', 'slot', 'bounds', 'text']);
@@ -77,6 +86,8 @@ try {
     assert.deepEqual(resolvePreviewExportSettings({ previewQuality: 'final', resolution: 72 }), { previewQuality: 'final', resolution: 72 });
     assert.ok(templateHandlerSource.includes('const maxPointSize = Number(args.maxPointSize ?? (before.pointSize || 72));'));
     assert.ok(!templateHandlerSource.includes('const maxPointSize = Number(args.maxPointSize ?? before.pointSize || 72);'));
+    assert.ok(templateHandlerSource.includes('let cleanArgs = trace ? { ...args } : args;'));
+    assert.ok(!templateHandlerSource.includes('const cleanArgs = trace ? { ...args } : args;'));
 
     delete process.env.INDESIGN_TOOL_PROFILE;
     const defaultProfileTools = getToolDefinitionsForProfile().map((tool) => tool.name);
@@ -136,9 +147,108 @@ try {
     assert.match(String(rejectedFit.result), /no longer supports fit=true/);
     assert.equal(executeCalls, 0);
 
+    TemplateHandlers.ensureTemplateReady = async () => ({ success: true });
+    ScriptExecutor.executeViaUXP = async () => {
+        throw new Error('executeViaUXP should not be called for rejected image paths');
+    };
+    await assert.rejects(
+        Promise.resolve().then(() => TemplateHandlers.uxpTool('create_image_frame', {
+            pageIndex: 1,
+            bounds: [0, 0, 40, 40],
+            unit: 'pt',
+            imagePath: outsideAssetPath,
+            name: 'unit__icon__image_frame',
+            label: { derivativeId: 'derivative_001', role: 'icon', slot: 'unit' }
+        })),
+        /Path must stay inside workspaceRoot|inside workspace assets|inside workspace input/
+    );
+    await assert.rejects(
+        Promise.resolve().then(() => TemplateHandlers.uxpTool('create_image_frame', {
+            pageIndex: 1,
+            bounds: [0, 0, 40, 40],
+            unit: 'pt',
+            filePath: original,
+            name: 'unit__icon__image_frame',
+            label: { derivativeId: 'derivative_001', role: 'icon', slot: 'unit' }
+        })),
+        /Refusing to write\/read original source path|inside workspaceRoot/
+    );
+    assert.equal(executeCalls, 0);
+
+    let capturedScript = '';
+    TemplateHandlers.ensureTemplateReady = async () => ({ success: true });
+    ScriptExecutor.executeViaUXP = async (script) => {
+        capturedScript = script;
+        executeCalls += 1;
+        return {
+            success: true,
+            objectId: 999,
+            name: 'unit__icon__image_frame',
+            bounds: [0, 0, 40, 40],
+            pageIndex: 1,
+            hasPlacedGraphic: true,
+            link: { path: assetPath, status: 'normal' },
+            warnings: []
+        };
+    };
+
+    const rawFrame = await TemplateHandlers.uxpTool('create_image_frame', {
+        pageIndex: 1,
+        bounds: [0, 0, 40, 40],
+        unit: 'pt',
+        imagePath: assetPath,
+        name: 'unit__icon__image_frame',
+        label: { derivativeId: 'derivative_001', role: 'icon', slot: 'unit' }
+    });
+    assert.equal(rawFrame.success, true);
+    assert.equal(rawFrame.objectId, 999);
+    assert.equal(executeCalls, 1);
+    assert.match(capturedScript, /create_image_frame/);
+    assert.match(capturedScript, /imagePath/);
+    assert.doesNotMatch(capturedScript, /Assignment to constant variable/);
+
+    TemplateHandlers.resolveDerivativeTarget = async () => ({
+        success: true,
+        derivativeId: 'derivative_001',
+        pageIndex: 1,
+        pageId: 12345,
+        resolvedBy: 'pageId',
+        warnings: []
+    });
+    ScriptExecutor.executeViaUXP = async () => ({
+        success: true,
+        objectId: 999,
+        name: 'unit__icon__image_frame',
+        bounds: [0, 0, 40, 40],
+        pageIndex: 1,
+        hasPlacedGraphic: true,
+        link: { path: assetPath, status: 'normal' },
+        warnings: []
+    });
+
+    const slotResult = await TemplateHandlers.create_image_slot({
+        derivativeId: 'derivative_001',
+        role: 'icon',
+        slot: 'unit',
+        bounds: [0, 0, 40, 40],
+        imagePath: assetPath
+    });
+    assert.equal(slotResult.success, true);
+    assert.equal(slotResult.result.objectId, 999);
+    assert.equal(slotResult.result.derivativeId, 'derivative_001');
+    assert.equal(slotResult.result.pageIndex, 1);
+    assert.equal(slotResult.result.pageId, 12345);
+    assert.equal(slotResult.result.resolvedBy, 'pageId');
+    assert.deepEqual(slotResult.result.warnings, []);
+    assert.equal(slotResult.result.hasPlacedGraphic, true);
+    assert.equal(slotResult.result.link.path, assetPath);
+    assert.equal(slotResult.result.link.status, 'normal');
+    assert.equal(slotResult.result.warnings.some((warning) => /Assignment to constant variable/i.test(String(warning))), false);
+
     console.log('Template unit tests passed');
 } finally {
     TemplateHandlers.ensureTemplateReady = originalEnsureTemplateReady;
+    TemplateHandlers.resolveDerivativeTarget = originalResolveDerivativeTarget;
     ScriptExecutor.executeViaUXP = originalExecuteViaUXP;
     clearActiveWorkspace();
     if (priorActiveState) fs.writeFileSync(activeStatePath, priorActiveState);

@@ -2467,7 +2467,7 @@ export class TemplateHandlers {
     static uxpTool(name, args) {
         // Extract trace from args to propagate through, remove before stringifying
         const trace = args && args.trace;
-        const cleanArgs = trace ? { ...args } : args;
+        let cleanArgs = trace ? { ...args } : args;
         if (cleanArgs && cleanArgs.trace) delete cleanArgs.trace;
         if (name === 'create_image_frame' && (cleanArgs.imagePath || cleanArgs.filePath)) {
             const m = loadWorkspace();
