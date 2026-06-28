@@ -14,6 +14,9 @@ function resolveCandidate(candidate: Record<string, unknown>) {
   const providerAssetId = String(candidate.providerAssetId ?? '');
   if (source === 'tabler') return getTablerSvg(providerAssetId);
   if (source === 'iconify-local') return getIconifyLocalSvg(providerAssetId);
+  if (source === 'iconify-api') {
+    throw new Error('Remote Iconify API candidates are discovery-only in this build. Install a local collection or use a Tabler candidate.');
+  }
   if (typeof candidate.svgText === 'string') return candidate.svgText;
   throw new Error(`Unsupported candidate source: ${source}`);
 }
@@ -57,9 +60,22 @@ export async function materializeAsset(input: unknown, options: { includePreview
           ]
         }
       },
-      safetyReport: sanitized.safetyReport,
-      previewPngBase64: parsed.data.includePreview ? renderPreview(sanitized.svgText) : undefined
+      safetyReport: sanitized.safetyReport
     };
+    if (parsed.data.includePreview) {
+      try {
+        output.previewPngBase64 = renderPreview(sanitized.svgText, { maxBytes: 2 * 1024 * 1024 });
+      } catch (error) {
+        if (error instanceof Error && error.message === 'PREVIEW_TOO_LARGE') {
+          output.safetyReport = {
+            ...output.safetyReport,
+            warnings: [...output.safetyReport.warnings, 'Preview omitted because rendered PNG exceeded the cap']
+          };
+        } else {
+          throw error;
+        }
+      }
+    }
     writeCachedAsset(output);
     return ok({
       asset: output

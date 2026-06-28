@@ -104,6 +104,20 @@ async function run() {
         assert.equal(path.basename(path.dirname(fallback.result.assetPath)), safeSha);
         assert.ok(!fallback.result.assetPath.includes('..'));
 
+        const traversalCases = ['../x', '/tmp/x', 'a/b', 'a\\b', '', '   '];
+        for (const assetId of traversalCases) {
+            const result = await AssetHandlers.materializeInlineSvgAsset({
+                assetId,
+                encoding: 'svgText',
+                svgText: safeSvg,
+                sha256: safeSha
+            });
+            assert.equal(result.success, true);
+            assert.equal(path.basename(path.dirname(result.result.assetPath)), safeSha);
+            assert.equal(result.result.safeAssetKey, safeSha);
+            assert.ok(result.result.assetPath.includes(path.join('assets', 'imports', safeSha)));
+        }
+
         const dotAsset = await AssetHandlers.materializeInlineSvgAsset({
             assetId: '.',
             encoding: 'svgText',

@@ -61,55 +61,65 @@ export async function vectorizeWithVTracer(config: DesignAssetsConfig, input: Vt
 
   let rasterPath = input.inputPath ?? null;
   let tempDir = null;
-  if (input.rasterBase64) {
-    tempDir = fs.mkdtempSync('/tmp/design-assets-mcp-');
-    rasterPath = `${tempDir}/input.${input.rasterMimeType?.split('/')[1] ?? 'png'}`;
-    const rasterBytes = Buffer.from(input.rasterBase64, 'base64');
-    if (rasterBytes.length > 5 * 1024 * 1024) {
-      return { success: false, error: { code: 'RASTER_TOO_LARGE', message: 'Raster input exceeds size cap' } };
+  try {
+    if (input.rasterBase64) {
+      tempDir = fs.mkdtempSync('/tmp/design-assets-mcp-');
+      rasterPath = `${tempDir}/input.${input.rasterMimeType?.split('/')[1] ?? 'png'}`;
+      const normalized = String(input.rasterBase64).replace(/\s+/g, '');
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(normalized) || normalized.length % 4 !== 0) {
+        return { success: false, error: { code: 'RASTER_BAD_BASE64', message: 'rasterBase64 is not valid base64' } };
+      }
+      const rasterBytes = Buffer.from(normalized, 'base64');
+      if (rasterBytes.toString('base64') !== normalized) {
+        return { success: false, error: { code: 'RASTER_BAD_BASE64', message: 'rasterBase64 is not valid base64' } };
+      }
+      if (rasterBytes.length > 5 * 1024 * 1024) {
+        return { success: false, error: { code: 'RASTER_TOO_LARGE', message: 'Raster input exceeds size cap' } };
+      }
+      fs.writeFileSync(rasterPath, rasterBytes);
+    } else if (input.inputPath) {
+      const allowedRoots = config.allowedInputRoots.length > 0 ? config.allowedInputRoots : [config.cacheDir];
+      if (!allowedRoots.some((root) => isInsideRoot(input.inputPath!, root))) {
+        return { success: false, error: { code: 'INPUT_PATH_NOT_ALLOWED', message: 'inputPath must stay inside an allowed input root' } };
+      }
+      if (!fs.existsSync(input.inputPath)) {
+        return { success: false, error: { code: 'INPUT_PATH_MISSING', message: 'inputPath does not exist' } };
+      }
+      if (fs.statSync(input.inputPath).size > 5 * 1024 * 1024) {
+        return { success: false, error: { code: 'INPUT_TOO_LARGE', message: 'inputPath exceeds size cap' } };
+      }
     }
-    fs.writeFileSync(rasterPath, rasterBytes);
-  } else if (input.inputPath) {
-    const allowedRoots = config.allowedInputRoots.length > 0 ? config.allowedInputRoots : [config.cacheDir];
-    if (!allowedRoots.some((root) => isInsideRoot(input.inputPath!, root))) {
-      return { success: false, error: { code: 'INPUT_PATH_NOT_ALLOWED', message: 'inputPath must stay inside an allowed input root' } };
-    }
-    if (!fs.existsSync(input.inputPath)) {
-      return { success: false, error: { code: 'INPUT_PATH_MISSING', message: 'inputPath does not exist' } };
-    }
-    if (fs.statSync(input.inputPath).size > 5 * 1024 * 1024) {
-      return { success: false, error: { code: 'INPUT_TOO_LARGE', message: 'inputPath exceeds size cap' } };
-    }
-  }
 
-  const traceArgs = [rasterPath!, '--output', '-', '--mode', input.mode ?? 'poster'];
-  const traced = await runCommand(config.vtracerCommand, traceArgs, config.vtracerTimeoutMs);
-  if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
-  if (traced.code !== 0) {
-    return { success: false, error: { code: 'VTRACER_FAILED', message: traced.stderr || 'vtracer failed' } };
-  }
-
-  const sanitized = sanitizeSvg(traced.stdout, { maxBytes: 2 * 1024 * 1024 });
-  const sha256 = bytesSha256(Buffer.from(sanitized.svgText, 'utf8'));
-  return {
-    success: true,
-    asset: {
-      assetId: `vtracer:${sha256.slice(0, 16)}`,
-      encoding: input.outputEncoding ?? 'svgText',
-      svgText: input.outputEncoding === 'base64' ? undefined : sanitized.svgText,
-      svgBase64: input.outputEncoding === 'base64' ? Buffer.from(sanitized.svgText, 'utf8').toString('base64') : undefined,
-      sha256,
-      byteLength: Buffer.byteLength(sanitized.svgText, 'utf8'),
-      recommendedFilename: `${sha256.slice(0, 16)}.svg`,
-      metadata: {
-        source: 'vtracer',
-        createdAt: new Date().toISOString(),
-        provenance: {
-          steps: [step('vtracer-trace', { mode: input.mode ?? 'poster' }, { outputSha256: sha256 })]
-        }
-      },
-      safetyReport: sanitized.safetyReport,
-      previewPngBase64: input.includePreview ? renderPreview(sanitized.svgText) : undefined
+    const traceArgs = [rasterPath!, '--output', '-', '--mode', input.mode ?? 'poster'];
+    const traced = await runCommand(config.vtracerCommand, traceArgs, config.vtracerTimeoutMs);
+    if (traced.code !== 0) {
+      return { success: false, error: { code: 'VTRACER_FAILED', message: traced.stderr || 'vtracer failed' } };
     }
-  };
+
+    const sanitized = sanitizeSvg(traced.stdout, { maxBytes: 2 * 1024 * 1024 });
+    const sha256 = bytesSha256(Buffer.from(sanitized.svgText, 'utf8'));
+    return {
+      success: true,
+      asset: {
+        assetId: `vtracer:${sha256.slice(0, 16)}`,
+        encoding: input.outputEncoding ?? 'svgText',
+        svgText: input.outputEncoding === 'base64' ? undefined : sanitized.svgText,
+        svgBase64: input.outputEncoding === 'base64' ? Buffer.from(sanitized.svgText, 'utf8').toString('base64') : undefined,
+        sha256,
+        byteLength: Buffer.byteLength(sanitized.svgText, 'utf8'),
+        recommendedFilename: `${sha256.slice(0, 16)}.svg`,
+        metadata: {
+          source: 'vtracer',
+          createdAt: new Date().toISOString(),
+          provenance: {
+            steps: [step('vtracer-trace', { mode: input.mode ?? 'poster' }, { outputSha256: sha256 })]
+          }
+        },
+        safetyReport: sanitized.safetyReport,
+        previewPngBase64: input.includePreview ? renderPreview(sanitized.svgText) : undefined
+      }
+    }
+  } finally {
+    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 }

@@ -22,6 +22,18 @@ The Mac-side InDesign MCP stays file-bound. It accepts sanitized inline SVG/base
 
 In template mode, place the returned path with `create_image_slot` or `replace_image_in_frame`. `place_file_on_page` is only available when the generic/all tool profile is active on the Mac server.
 
+## Local Iconify
+
+- Tabler works out of the box through `@iconify-json/tabler`.
+- Additional local Iconify collections require installing explicit packages such as `@iconify-json/mdi` or `@iconify-json/lucide`.
+- This package does not install every collection by default.
+
+Remote Iconify API search is opt-in through `allowRemote=true`, and remote candidates are discovery-only in this build. They are marked non-materializable unless you install a local collection for the same icon.
+
+## Preview cap
+
+Rendered PNG previews are capped at 2 MiB. If a preview would exceed the cap, `preview_asset` fails cleanly and `materialize_asset` omits the preview with a warning in the returned safety report.
+
 ## Env
 
 - `RECRAFT_API_TOKEN`
@@ -36,4 +48,5 @@ In template mode, place the returned path with `create_image_slot` or `replace_i
 
 ```bash
 npm test
+npm run typecheck
 ```

@@ -16,7 +16,8 @@ export async function searchIconifyApi(query: string, maxResults = 20, baseUrl =
     tags: icon.tags || [],
     license: undefined,
     confidence: 0.6,
-    warnings: ['remote search result'],
+    materializable: false,
+    warnings: ['Remote Iconify API candidates are discovery-only in this build.'],
     _remote: true
   }));
 }
