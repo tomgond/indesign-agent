@@ -768,7 +768,7 @@ export class TemplateHandlers {
                 sizeBytes: stat.sizeBytes,
                 createdAt: rec.createdAt || null
             };
-            if (args.returnImage !== false) {
+            if (args.returnImage === true) {
                 if (args.maxInlineBytes != null && stat.sizeBytes > Number(args.maxInlineBytes)) {
                     throw new Error(`Preview exceeds maxInlineBytes: ${stat.sizeBytes} > ${Number(args.maxInlineBytes)}`);
                 }
@@ -1482,7 +1482,9 @@ export class TemplateHandlers {
                     const visible = itemVisibleState(item, layer);
                     if (visible) visibleItemCount += 1;
                     else hiddenItemCount += 1;
-                    const pageCoverageRatio = intersection ? Number((rectArea(intersection) / pageArea).toFixed(4)) : 0;
+                    const insideArea = intersection ? rectArea(intersection) : 0;
+                    const pageCoverageRatio = intersection ? Number((insideArea / pageArea).toFixed(4)) : 0;
+                    const outsidePageRatio = Number((Math.max(0, 1 - (insideArea / itemArea))).toFixed(4));
                     if (!intersection) offPageCount += 1;
                     if (args.includeHidden !== true && !visible) continue;
 
@@ -1503,6 +1505,7 @@ export class TemplateHandlers {
                         label: readLabel(item),
                         text: textSummary(item),
                         pageCoverageRatio,
+                        outsidePageRatio,
                         offPage: !intersection,
                         hasFill: !!swatchName(safe(()=>item.fillColor, null)) && !/None/i.test(String(swatchName(safe(()=>item.fillColor, null)) || ''))
                     };
@@ -1542,7 +1545,7 @@ export class TemplateHandlers {
                 likelyCauses.push('export_page_mismatch');
             }
             const recommendedNextStep = likelyCauses.includes('full_page_occluder')
-                ? 'Use set_item_layer or send_to_back on the suspected full-page background, then export a low-resolution checkpoint preview.'
+                ? 'Use set_item_layer or send_to_back on the suspected full-page object, then export a checkpoint preview.'
                 : likelyCauses.includes('hidden_layer') || likelyCauses.includes('locked_layer')
                     ? 'Repair the affected layer visibility or placement explicitly, then export a checkpoint preview.'
                     : 'Compare structured inspection against a checkpoint preview again before making content edits.';
@@ -1582,54 +1585,49 @@ export class TemplateHandlers {
                 targetLayer.locked = false;
                 layerWarnings.push('Unlocked target layer');
             }
-            const changed = [];
+            const items = [];
+            const overallWarnings = [];
             for (const id of ids) {
                 const item = itemById(id);
                 const before = {
-                    objectId: safe(()=>item.id),
-                    name: safe(()=>item.name),
-                    oldLayerName: safe(()=>item.itemLayer && item.itemLayer.name, null),
+                    layerName: safe(()=>item.itemLayer && item.itemLayer.name, null),
                     bounds: clone(safe(()=>item.geometricBounds, null))
                 };
                 item.itemLayer = targetLayer;
-                let zOrderAction = 'unchanged';
+                const actions = ['setLayer'];
                 if (args.zOrder === 'front') {
                     item.bringToFront();
-                    zOrderAction = 'front';
+                    actions.push('bringToFront');
                 } else if (args.zOrder === 'back') {
                     item.sendToBack();
-                    zOrderAction = 'back';
+                    actions.push('sendToBack');
                 }
-                changed.push(args.returnBeforeAfter === false ? {
-                    objectId: before.objectId,
-                    name: before.name,
-                    oldLayerName: before.oldLayerName,
-                    newLayerName: safe(()=>item.itemLayer && item.itemLayer.name, null),
-                    bounds: clone(safe(()=>item.geometricBounds, null)),
-                    zOrder: zOrderAction,
-                    warnings: layerWarnings.slice()
-                } : {
-                    objectId: before.objectId,
-                    name: before.name,
-                    oldLayerName: before.oldLayerName,
-                    newLayerName: safe(()=>item.itemLayer && item.itemLayer.name, null),
-                    bounds: clone(safe(()=>item.geometricBounds, null)),
-                    before,
-                    after: {
-                        objectId: safe(()=>item.id),
-                        name: safe(()=>item.name),
-                        newLayerName: safe(()=>item.itemLayer && item.itemLayer.name, null),
+                const record = {
+                    objectId: safe(()=>item.id),
+                    name: safe(()=>item.name),
+                    actions
+                };
+                if (args.returnBeforeAfter === false) {
+                    record.layerName = safe(()=>item.itemLayer && item.itemLayer.name, null);
+                    record.bounds = clone(safe(()=>item.geometricBounds, null));
+                } else {
+                    record.before = before;
+                    record.after = {
+                        layerName: safe(()=>item.itemLayer && item.itemLayer.name, null),
                         bounds: clone(safe(()=>item.geometricBounds, null))
-                    },
-                    zOrder: zOrderAction,
-                    warnings: layerWarnings.slice()
-                });
+                    };
+                }
+                if (layerWarnings.length) record.warnings = layerWarnings.slice();
+                items.push(record);
             }
+            overallWarnings.push(...layerWarnings);
             return {
                 success: true,
                 layerName: safe(()=>targetLayer.name, targetName),
                 createdLayer,
-                changed
+                zOrder: args.zOrder || 'unchanged',
+                items,
+                warnings: overallWarnings
             };
         `), 'set_item_layer');
     }

@@ -216,15 +216,11 @@ try {
         assert.equal(resolvedPreview.success, true);
         assert.equal(resolvedPreview.result.previewId, 'preview_invite_poster_a4_001');
         assert.equal(resolvedPreview.result.path, derivativePreview.result.path);
-        assert.ok(resolvedPreview.result.mcpImage);
+        assert.ok(!resolvedPreview.result.mcpImage);
         assert.ok(!('dataBase64' in resolvedPreview.result));
 
         const resolvedContent = formatMcpContent(resolvedPreview);
-        assert.equal(resolvedContent[0].type, 'image');
-        assert.equal(resolvedContent[0].mimeType, 'image/png');
-        assert.equal(resolvedContent[1].type, 'text');
-        assert.ok(!resolvedContent[1].text.includes('"mcpImage"'));
-        assert.ok(!resolvedContent[1].text.includes(PNG_BASE64.slice(0, 16)));
+        assertTextOnly(resolvedContent);
 
         fs.rmSync(derivativePreview.result.path);
         const missingFile = await TemplateHandlers.return_preview_as_image({
@@ -243,8 +239,15 @@ try {
         assert.ok(!legacy.result.mcpImage);
         assert.ok(legacy.result.dataBase64);
 
+        const withImage = await TemplateHandlers.return_preview_as_image({
+            previewId: 'preview_invite_poster_a4_001',
+            returnImage: true
+        });
+        assert.ok(withImage.result.mcpImage);
+
         const tooLarge = await TemplateHandlers.return_preview_as_image({
             previewId: 'preview_invite_poster_a4_001',
+            returnImage: true,
             maxInlineBytes: 1
         });
         assert.equal(tooLarge.success, false);

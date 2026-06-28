@@ -23,7 +23,7 @@ These pieces are complete enough for Node-side use and have local checks:
 - Version copy/list/rollback at the filesystem level.
 - Default denial of public `execute_indesign_code` unless `ALLOW_EXECUTE_INDESIGN_CODE=true`.
 - Workspace-active guard for risky open/save/export/package paths covered in the local pass.
-- `return_preview_as_image` for an existing workspace PNG/JPG file, with MCP image output by default.
+- `return_preview_as_image` for an existing workspace PNG/JPG file, returning metadata by default and MCP image output only when explicitly requested.
 - `capture_screen_preview`, `capture_indesign_screen_preview`, `export_page_preview`, `export_spread_preview`, and `export_derivative_preview` now return MCP images by default when the caller does not opt out.
 - Preview export quality presets with cheap `checkpoint` defaults, metadata (`previewQuality`, `resolution`, pixel size, bytes), and lower-cost internal preview calls in roundtrip/finalization flows.
 - `diagnose_visual_mismatch` for targeted read-only preview-vs-structure diagnosis on one page.
@@ -147,7 +147,7 @@ Still pending: live Mac/InDesign retest after deployment and deeper fixture-driv
 - Made preview exports default to low-cost `checkpoint` quality unless callers opt into `review`, `final`, or an explicit resolution.
 - Stopped `verify_template_roundtrip`, `finalize_derivative`, and `build_derivative_from_recipe` from inlining preview images by default.
 - Separated text mutation from fitting by rejecting `update_text_slot({ fit: true })`.
-- Added focused local regressions plus an optional live reliability script: `tests/test-template-reliability-live.js`.
+- Added focused local regressions in `tests/test-template-reliability.js` plus an optional live reliability script: `tests/test-template-reliability-live.js`.
 
 ## What it takes to finish
 

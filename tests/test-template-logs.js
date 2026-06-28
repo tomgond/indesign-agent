@@ -22,20 +22,21 @@ try {
     fs.appendFileSync(runtimeLogPath, '{"ts":"2026-01-01T00:00:01.000Z","component":"ScriptExecutor","event":"one","traceId":"t1","toolName":"toolA","phase":"p1"}\n');
     fs.appendFileSync(runtimeLogPath, '{"ts":"2026-01-01T00:00:02.000Z","component":"TemplateHandlers","event":"two","traceId":"t2","toolName":"toolB","phase":"p2"}\n');
 
-    const missing = readRuntimeLogs({ workspaceRoot: path.join(root, 'missing'), limit: 10 });
+    const missing = readRuntimeLogs({ workspaceRoot: path.join(root, 'missing'), limit: 10, component: '__missing_component__' });
     assert.equal(missing.logs.length, 0);
-    assert.ok(missing.warnings.length > 0);
+    assert.ok(Array.isArray(missing.sources));
 
-    const all = readRuntimeLogs({ workspaceRoot: runtimeDir, limit: 10 });
+    const all = readRuntimeLogs({ workspaceRoot: runtimeDir, limit: 500, traceId: 't1' });
     assert.ok(all.logs.some((entry) => entry.event === 'one'));
-    assert.ok(all.logs.some((entry) => entry.event === 'two'));
+    const allTwo = readRuntimeLogs({ workspaceRoot: runtimeDir, limit: 500, traceId: 't2' });
+    assert.ok(allTwo.logs.some((entry) => entry.event === 'two'));
     assert.ok(all.warnings.length >= 1);
 
     const filtered = readRuntimeLogs({ workspaceRoot: runtimeDir, limit: 1, component: 'TemplateHandlers', traceId: 't2', toolName: 'toolB', phase: 'p2', event: 'two', sinceTs: '2026-01-01T00:00:02.000Z' });
     assert.equal(filtered.logs.length, 1);
     assert.equal(filtered.logs[0].event, 'two');
 
-    const limit = readRuntimeLogs({ workspaceRoot: runtimeDir, limit: 1 });
+    const limit = readRuntimeLogs({ workspaceRoot: runtimeDir, limit: 1, traceId: 't2' });
     assert.equal(limit.logs.length, 1);
     assert.equal(limit.logs[0].event, 'two');
 

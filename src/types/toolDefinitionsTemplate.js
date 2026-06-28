@@ -43,7 +43,8 @@ const layerNameSchema = {
 const previewQualitySchema = {
     type: 'string',
     enum: ['checkpoint', 'review', 'final'],
-    default: 'checkpoint'
+    default: 'checkpoint',
+    description: 'Preset for preview export cost/quality. checkpoint is low-cost for frequent validation; review/final are opt-in.'
 };
 
 const boundsValidationSchemaProps = {
@@ -302,13 +303,13 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'diagnose_visual_mismatch',
-        description: 'Targeted read-only diagnosis for pages where preview evidence and structured inspection disagree.',
+        description: 'Read-only targeted diagnosis for cases where exported preview evidence and structured page-item evidence disagree.',
         inputSchema: {
             ...schema({
-                derivativeId: { type: 'string' },
-                pageIndex: { type: 'integer', minimum: 0 },
-                includeHidden: { type: 'boolean', default: true },
-                minPageCoverageRatio: { type: 'number', minimum: 0, maximum: 1, default: 0.5 },
+                derivativeId: { type: 'string', description: 'Derivative ID to resolve to a page.' },
+                pageIndex: { type: 'integer', minimum: 0, description: 'Page index to diagnose when derivativeId is not provided.' },
+                includeHidden: { type: 'boolean', default: true, description: 'Include hidden/nonprinting/locked items in the structural diagnostic.' },
+                minPageCoverageRatio: { type: 'number', minimum: 0, maximum: 1, default: 0.5, description: 'Minimum page coverage ratio for flagging large possible occluders.' },
                 limit: { type: 'integer', minimum: 1, maximum: 500, default: 200 }
             }),
             anyOf: [{ required: ['derivativeId'] }, { required: ['pageIndex'] }]
@@ -316,14 +317,14 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'set_item_layer',
-        description: 'Move one or more page items to a named layer, optionally creating the layer and applying simple z-order repair.',
+        description: 'Move selected page items to a named layer, optionally creating it and applying simple front/back z-order.',
         inputSchema: schema({
             objectIds: {
                 type: 'array',
                 minItems: 1,
                 items: { type: 'integer' }
             },
-            layerName: { type: 'string' },
+            layerName: { type: 'string', minLength: 1 },
             createIfMissing: { type: 'boolean', default: true },
             zOrder: {
                 type: 'string',
@@ -567,7 +568,7 @@ const primitiveToolDefinitions = [
     { name: 'inspect_parent_pages', description: 'Inspect document parent pages/master spreads.', inputSchema: schema({ includePageItems: { type: 'boolean', default: false }, allowHeavyInspection: { type: 'boolean', default: false }, limit: { type: 'integer', minimum: 1, maximum: 500, default: 100 }, offset: { type: 'integer', minimum: 0, default: 0 } }) },
     { name: 'export_page_preview', description: 'Export a page preview into workspace previews/.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, outputName: { type: 'string', description: 'Basename only.' }, format: { type: 'string', enum: ['png', 'jpg'], default: 'png' }, previewQuality: previewQualitySchema, resolution: { type: 'number', minimum: 1 }, transparentBackground: { type: 'boolean', default: false }, overwrite: { type: 'boolean', default: false }, returnImage: { type: 'boolean', default: true } }, ['pageIndex']) },
     { name: 'export_spread_preview', description: 'Export a spread preview into workspace previews/.', inputSchema: schema({ spreadIndex: { type: 'integer', minimum: 0 }, outputName: { type: 'string', description: 'Basename only.' }, format: { type: 'string', enum: ['png', 'jpg'], default: 'png' }, previewQuality: previewQualitySchema, resolution: { type: 'number', minimum: 1 }, transparentBackground: { type: 'boolean', default: false }, overwrite: { type: 'boolean', default: false }, returnImage: { type: 'boolean', default: true } }, ['spreadIndex']) },
-    { name: 'return_preview_as_image', description: 'Return a stored preview as an MCP image response item.', inputSchema: schema({ previewId: { type: 'string' }, path: { type: 'string', description: 'Path under previews/.' }, returnImage: { type: 'boolean', default: true }, legacyDataBase64: { type: 'boolean', default: false }, maxInlineBytes: { type: 'integer', minimum: 1, description: 'Optional guardrail for inline image payload size.' } }, [], { anyOf: [{ required: ['previewId'] }, { required: ['path'] }] }) },
+    { name: 'return_preview_as_image', description: 'Return stored preview metadata and optionally attach an MCP image payload.', inputSchema: schema({ previewId: { type: 'string' }, path: { type: 'string', description: 'Path under previews/.' }, returnImage: { type: 'boolean', default: false }, legacyDataBase64: { type: 'boolean', default: false }, maxInlineBytes: { type: 'integer', minimum: 1, description: 'Optional guardrail for inline image payload size.' } }, [], { anyOf: [{ required: ['previewId'] }, { required: ['path'] }] }) },
     { name: 'create_page', description: 'Create a page for template work.', inputSchema: { ...schema({ pageWidth: { type: 'number', exclusiveMinimum: 0 }, pageHeight: { type: 'number', exclusiveMinimum: 0 }, width: { type: 'number', exclusiveMinimum: 0 }, height: { type: 'number', exclusiveMinimum: 0 }, pageSize: { type: 'string', enum: ['A5', 'A3', 'social_square'] }, orientation: { type: 'string', enum: ['portrait', 'landscape'] }, unit: unitSchema, name: { type: 'string' }, derivativeId: { type: 'string' }, marginTop: { type: 'number', minimum: 0 }, marginBottom: { type: 'number', minimum: 0 }, marginLeft: { type: 'number', minimum: 0 }, marginRight: { type: 'number', minimum: 0 } }), anyOf: [{ required: ['pageWidth', 'pageHeight'] }, { required: ['width', 'height'] }, { required: ['pageSize'] }] } },
     { name: 'duplicate_page', description: 'Duplicate a page in the active working copy.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, derivativeId: { type: 'string' }, name: { type: 'string' } }, ['pageIndex']) },
     { name: 'create_text_frame', description: 'Create a text frame on a specific page.', inputSchema: schema({ pageIndex: { type: 'integer', minimum: 0 }, bounds: boundsSchema, unit: unitSchema, coordinateSpace: coordinateSpaceSchema, layerName: layerNameSchema, text: { type: 'string', default: '' }, content: { type: 'string' }, name: { type: 'string' }, label: labelObjectSchema, paragraphStyle: { type: 'string' }, characterStyle: { type: 'string' }, objectStyle: { type: 'string' }, fillSwatch: { type: 'string' }, strokeSwatch: { type: 'string' }, strokeWeight: { type: 'number', minimum: 0 }, ...boundsValidationSchemaProps }, ['pageIndex', 'bounds']) },

@@ -71,7 +71,7 @@ async function main() {
         layerName: 'AGENT_BACKGROUND',
         zOrder: 'back'
     });
-    assert.equal(repair.changed[0].newLayerName, 'AGENT_BACKGROUND');
+    assert.equal(repair.items[0].after.layerName, 'AGENT_BACKGROUND');
 
     const reviewPreview = await call(server, 'export_derivative_preview', {
         derivativeId,

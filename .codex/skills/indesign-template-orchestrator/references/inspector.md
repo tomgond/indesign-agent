@@ -42,6 +42,8 @@ Allowed tools:
 - `list_visual_reviews`
 - `return_preview_as_image`
 
+When using `return_preview_as_image`, request inline image payloads only when needed for human review. Metadata-only preview evidence is the default.
+
 ## Protocol
 
 1. Validate workspace state with `get_workspace_status` and `validate_active_document_is_working_copy`.

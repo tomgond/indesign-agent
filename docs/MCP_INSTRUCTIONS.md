@@ -102,6 +102,7 @@ Operational endpoints:
 - When changing setup, tool behavior, or validation state, update the matching docs in the same pass.
 - Use exported previews for document truth and keep live screen capture for viewport/focus/UI diagnosis.
 - Default derivative preview checkpoints to `previewQuality: "checkpoint"` and only raise quality for review/final proof.
+- Treat `return_preview_as_image` as metadata-first. Request inline image payloads only when you actually need them.
 - Do not treat object existence as visual success; after visible mutation batches, pair cheap preview evidence with structured inspection.
 - Run `diagnose_visual_mismatch` only when preview evidence and structured inspection disagree materially.
 - Use `set_item_layer` or explicit front/back ordering for layer repairs instead of ad hoc repeated screenshot loops.
