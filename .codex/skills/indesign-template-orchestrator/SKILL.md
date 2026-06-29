@@ -65,6 +65,19 @@ bootstrap workspace
   -> finalize and save version
 ```
 
+## CSV/Table Template Fill Flow
+
+When the request is "duplicate this finished page for each CSV/table row and change only text," use the simpler deterministic path instead of the creative derivative workflow:
+
+1. Validate/open the workspace working copy and inspect the source page slots.
+2. Let `scripts/fill_template_from_csv.py` read exact local CSV values; the model supplies only configuration and slot mapping.
+3. Call `duplicate_template_page` once per row. Do not substitute `create_derivative_page`, which only creates a new page and optionally copies labeled editable motifs.
+4. Update each field with `update_text_slot` targeted by `{ derivativeId, slot }`, never by selected frame/current page and never with `fit:true`.
+5. Stop on duplicate slots or threaded/shared/raw text safety refusals. Fit separately only when explicitly configured and inspect the result.
+6. Inspect/check the derivatives, sample checkpoint previews for large batches, and save the working copy/version.
+
+The source slots should be labeled like `{ "slot": "name", "role": "title", "editable": true }`; duplication patches in the row's `derivativeId`. Completion requires the runner to report all selected rows processed with no row/slot errors. Visual completion still requires preview and structured inspection evidence. See `docs/template-generation/csv-template-fill.md`.
+
 ## Phase Guide
 
 ### 1. Bootstrap

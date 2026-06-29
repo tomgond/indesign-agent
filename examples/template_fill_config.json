@@ -1,0 +1,15 @@
+{
+  "mcpUrl": "http://mac-hostname-or-ip:3333/mcp",
+  "sourcePageIndex": 0,
+  "rowIdColumn": "id",
+  "derivativeIdPattern": "invite_{id}",
+  "slotColumnMap": {
+    "name": "name",
+    "title": "title",
+    "date": "date"
+  },
+  "saveWorkingCopy": true,
+  "exportPreview": false,
+  "limit": null,
+  "offset": 0
+}

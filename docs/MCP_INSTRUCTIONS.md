@@ -116,6 +116,16 @@ Operational endpoints:
 - `fit_text_to_frame` is a heuristic only. Check `resolved` and `stillOverset`; it does not repair story/thread corruption.
 - Decorative bleed is explicit. Keep normal content slots strict unless a call sets `allowBleed` or `decorative`.
 
+## CSV/Table Template Fill Flow
+
+For a finished source page that needs many text-only copies, use `duplicate_template_page`, not `create_derivative_page`. The former duplicates the complete page through InDesign and patches labeled slots with the new `derivativeId`; the latter creates a new page and optionally copies only labeled editable motifs for creative layout generation.
+
+Source text frames should have labels such as `{ "slot": "name", "role": "title", "editable": true }`. After duplication, update through `labelQuery: { "derivativeId": "invite_001", "slot": "name" }`. Do not target the selected frame, current page, or a cached page index.
+
+Use `scripts/fill_template_from_csv.py` for deterministic table transfer. Python reads the CSV on Linux, preserves exact cell values, initializes and reuses one Streamable HTTP MCP session, duplicates per row, and calls `update_text_slot` with `textReplacePolicy: "isolatedOnly"`. The model supplies the config/mapping once and does not manually copy row values. Duplicate slots and unsafe threaded/shared stories are errors; fitting is a separate explicit operation and `update_text_slot({ fit: true })` remains forbidden.
+
+See `./template-generation/csv-template-fill.md` for configuration, command, failure reporting, and the live-validation checklist. Completion requires no runner row/slot errors; final visual success still requires preview plus structured inspection evidence.
+
 ## Verification
 
 Run the smallest relevant check:

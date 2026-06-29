@@ -54,6 +54,23 @@ Decorative bleed is opt-in. Keep normal content slots strict unless a call expli
 
 Once one or two targeted repairs fail to improve the preview, or known-good text/motif preservation becomes uncertain, stop salvage work and rebuild from the source anchor instead.
 
+## CSV/Table Template Fill Flow
+
+Use this flow when a finished source page should be copied once per CSV/table row with only text changes.
+
+- Prefer `duplicate_template_page`; it duplicates the complete page through InDesign and preserves its images, placed graphics, shapes, styles, swatches, layers, and geometry as normal duplication allows.
+- Do not use `create_derivative_page` as a complete copy. That tool creates a new creative derivative page and optionally copies labeled editable motifs only.
+- Label source text frames, for example `{ "slot": "name", "role": "title", "editable": true }`. Duplication patches in the row `derivativeId`, so updates use `{ "derivativeId": "invite_001", "slot": "name" }`.
+- Let `scripts/fill_template_from_csv.py` read exact local CSV values. The model chooses config/mapping once and does not manually copy row values.
+- Validate/open the working copy, duplicate once per row, call `update_text_slot` by `derivativeId` plus slot, optionally inspect/check/export checkpoint previews, then save.
+- Fail on ambiguous duplicate slots and respect threaded/shared/raw text diagnostics. Do not use UI/text-edit automation, selection/current-page targeting, raw page indexes as durable identity, or `update_text_slot` with `fit:true`.
+
+```bash
+python scripts/fill_template_from_csv.py --csv examples/template_rows.csv --config examples/template_fill_config.json --out fill_result.json
+```
+
+Claim completion only when the runner reports all selected rows processed with no row/slot errors. Final visual success still requires preview and structured inspection; sample previews for large batches. See `docs/template-generation/csv-template-fill.md`.
+
 ## Geometry
 
 Template bounds use InDesign order:

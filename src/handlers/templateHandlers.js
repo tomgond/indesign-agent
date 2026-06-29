@@ -993,6 +993,175 @@ export class TemplateHandlers {
         })(), 'create_derivative_page');
     }
 
+    static duplicate_template_page(args = {}) {
+        return response((async () => {
+            if (!args.derivativeId) throw new Error('derivativeId is required');
+            if (!Number.isInteger(args.sourcePageIndex) || args.sourcePageIndex < 0) throw new Error('sourcePageIndex must be an integer >= 0');
+            const textSafetyMode = args.textSafetyMode || 'preserve_but_guard';
+            if (textSafetyMode === 'fresh_text_slots') {
+                throw new Error('textSafetyMode=fresh_text_slots is not implemented; use preserve_but_guard or create fresh slots explicitly with create_text_slot.');
+            }
+            const payload = {
+                ...args,
+                relabelSlots: args.relabelSlots !== false,
+                copyPageLabel: args.copyPageLabel === true,
+                requireUniqueSlots: args.requireUniqueSlots !== false,
+                includeObjectSummary: args.includeObjectSummary !== false,
+                textSafetyMode
+            };
+            const manifest = loadWorkspace();
+            const duplicated = await runGuarded(`${jsHelpers()} const args=${q(payload)};
+                const sourcePage = pageByIndex(args.sourcePageIndex);
+                let createdPage = null;
+                try {
+                    createdPage = sourcePage.duplicate();
+                    if (args.name) createdPage.name = String(args.name);
+
+                    const copiedItems = arr(safe(() => createdPage.allPageItems, createdPage.pageItems), (item) => item)
+                        .filter((item) => item && safe(() => item.isValid !== false, true));
+                    let removedCopiedMarkers = 0;
+                    for (const item of copiedItems.slice()) {
+                        const label = readLabel(item);
+                        if (label.role === 'page_marker' && label.metadata === true) {
+                            try { item.remove(); removedCopiedMarkers += 1; } catch (error) {}
+                        }
+                    }
+
+                    const pageItems = arr(safe(() => createdPage.allPageItems, createdPage.pageItems), (item) => item)
+                        .filter((item) => item && safe(() => item.isValid !== false, true));
+                    const sourcePageLabel = readLabel(sourcePage);
+                    const pageLabel = Object.assign(
+                        {},
+                        args.copyPageLabel ? sourcePageLabel : {},
+                        { derivativeId: args.derivativeId, role: 'derivative_page', source: 'duplicate_template_page', sourcePageIndex: args.sourcePageIndex }
+                    );
+                    writeLabel(createdPage, pageLabel);
+
+                    const copiedSlotItems = [];
+                    for (const item of pageItems) {
+                        let label = readLabel(item);
+                        if (typeof label.slot !== 'string' || label.slot.length === 0) continue;
+                        if (args.relabelSlots) {
+                            label = Object.assign({}, label, {
+                                derivativeId: args.derivativeId,
+                                duplicatedFromTemplatePageIndex: args.sourcePageIndex
+                            });
+                            writeLabel(item, label);
+                        }
+                        copiedSlotItems.push({ item, label });
+                    }
+
+                    const slotCandidates = [];
+                    for (const item of pageItems) {
+                        if (!isTextFrame(item)) continue;
+                        const label = readLabel(item);
+                        if (typeof label.slot !== 'string' || label.slot.length === 0) continue;
+                        if (args.slotLabelQuery && !labelMatches(label, args.slotLabelQuery)) continue;
+                        slotCandidates.push({ item, label, diagnostics: textFrameDiagnostics(item, { excerptLimit: 200 }) });
+                    }
+                    const duplicateSlots = [];
+                    const slotCounts = {};
+                    for (const candidate of slotCandidates) {
+                        const slot = candidate.label.slot;
+                        slotCounts[slot] = (slotCounts[slot] || 0) + 1;
+                        if (slotCounts[slot] === 2) duplicateSlots.push(slot);
+                    }
+                    if (args.requireUniqueSlots && duplicateSlots.length) {
+                        throw new Error('Duplicate text slot names on copied page: ' + duplicateSlots.join(', '));
+                    }
+
+                    const textSlots = [];
+                    const warnings = [];
+                    for (const candidate of slotCandidates) {
+                        const threadedOrShared = textFrameIsThreadedOrShared(candidate.item, candidate.diagnostics);
+                        let label = candidate.label;
+                        if (args.relabelSlots) {
+                            label = Object.assign({}, label, {
+                                derivativeId: args.derivativeId,
+                                duplicatedFromTemplatePageIndex: args.sourcePageIndex,
+                                duplicatedTextFrame: true,
+                                textSafetyMode: args.textSafetyMode,
+                                requiresTextSafetyCheck: true
+                            });
+                            if (args.textSafetyMode === 'raw') label.rawTextDuplicate = true;
+                            writeLabel(candidate.item, label);
+                        }
+                        if (threadedOrShared) warnings.push('Slot ' + label.slot + ' appears threaded/shared; update_text_slot isolatedOnly will refuse it.');
+                        if (candidate.diagnostics.overflows) warnings.push('Slot ' + label.slot + ' is overset on the duplicated page.');
+                        textSlots.push({
+                            slot: label.slot,
+                            role: label.role || null,
+                            objectId: safe(() => candidate.item.id, null),
+                            name: safe(() => candidate.item.name, null),
+                            type: safe(() => candidate.item.constructor && candidate.item.constructor.name, null),
+                            bounds: clone(safe(() => candidate.item.geometricBounds, null)),
+                            label: clone(label),
+                            overflows: !!candidate.diagnostics.overflows,
+                            textDiagnostics: Object.assign({}, candidate.diagnostics, { threadedOrShared })
+                        });
+                    }
+                    if (args.textSafetyMode === 'raw' && textSlots.length) warnings.push('textSafetyMode=raw preserves duplicated text state; inspect each slot before replacement.');
+                    if (removedCopiedMarkers) warnings.push('Removed ' + removedCopiedMarkers + ' copied metadata page marker(s) before creating the new derivative marker.');
+
+                    const placedGraphics = [];
+                    const imageSlots = [];
+                    if (args.includeObjectSummary) {
+                        for (const item of pageItems) {
+                            const link = linkInfo(item);
+                            if (link) placedGraphics.push({ objectId: safe(() => item.id, null), name: safe(() => item.name, null), type: safe(() => item.constructor && item.constructor.name, null), bounds: clone(safe(() => item.geometricBounds, null)), link });
+                        }
+                        for (const candidate of copiedSlotItems) {
+                            if (isTextFrame(candidate.item)) continue;
+                            imageSlots.push({ slot: candidate.label.slot, role: candidate.label.role || null, objectId: safe(() => candidate.item.id, null), name: safe(() => candidate.item.name, null), type: safe(() => candidate.item.constructor && candidate.item.constructor.name, null), bounds: clone(safe(() => candidate.item.geometricBounds, null)), label: clone(candidate.label), link: linkInfo(candidate.item) });
+                        }
+                    }
+                    const bounds = clone(safe(() => createdPage.bounds, null));
+                    const pageIndex = collectionIndexById(doc.pages, createdPage);
+                    return {
+                        success: true,
+                        derivativeId: args.derivativeId,
+                        sourcePageIndex: args.sourcePageIndex,
+                        pageIndex,
+                        pageId: safe(() => createdPage.id, null),
+                        pageName: safe(() => createdPage.name, null),
+                        pageBounds: bounds,
+                        pageSize: bounds ? { width: bounds[3] - bounds[1], height: bounds[2] - bounds[0], unit: 'pt' } : null,
+                        spreadIndex: collectionIndexById(doc.spreads, safe(() => createdPage.parent, null)),
+                        copiedObjectCount: pageItems.length,
+                        textSlots,
+                        imageSlots,
+                        placedGraphics,
+                        warnings
+                    };
+                } catch (error) {
+                    if (createdPage) { try { createdPage.remove(); } catch (removeError) {} }
+                    throw error;
+                }
+            `);
+            await this.createDerivativePageMarker({ derivativeId: args.derivativeId, pageIndex: duplicated.pageIndex });
+            upsertDerivativePage(manifest, args.derivativeId, {
+                pageIndex: duplicated.pageIndex,
+                pageId: duplicated.pageId ?? null,
+                pageName: duplicated.pageName || null,
+                pageBounds: duplicated.pageBounds || null,
+                pageSize: duplicated.pageSize || null,
+                spreadIndex: duplicated.spreadIndex ?? null,
+                sourcePageIndex: args.sourcePageIndex,
+                source: 'duplicate_template_page',
+                status: 'draft',
+                name: args.name || duplicated.pageName || null
+            });
+            return {
+                ...duplicated,
+                warnings: [...new Set([
+                    ...(duplicated.warnings || []),
+                    'Full-page duplication and visual fidelity require live Mac/InDesign/UXP validation; this tool is covered locally only.'
+                ])],
+                unsupportedLiveValidation: true
+            };
+        })(), 'duplicate_template_page');
+    }
+
     static resolve_derivative_page(args = {}) {
         return response((async () => {
             const manifest = loadWorkspace();

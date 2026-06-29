@@ -68,6 +68,19 @@ Failed live before these fixes:
 - The focused runner has been updated for both local spawned-server mode and remote `MCP_URL` mode.
 - A local rerun on June 21, 2026 reached the server and bridge, but could not validate handlers because the bridge reported: `Error: Plugin not connected. Open InDesign, then load the Bridge Panel via UXP Developer Tool.`
 - A fresh post-fix remote validation result is still pending because this workspace does not have the private remote `MCP_URL` and writable `MCP_EXPORT_DIR` required to execute the live rerun.
+- `duplicate_template_page` and the Linux CSV runner have local static/unit coverage only. Full-page duplication has not been validated against live InDesign.
+
+## Pending CSV Template Duplication Scenario
+
+Create a source page containing one placed image frame, one background shape, two labeled/styled text slots, and one unlabeled decorative item. Through the template workspace working copy:
+
+1. Run `duplicate_template_page` with a new `derivativeId`.
+2. Confirm all visible objects, links, layers, styles, swatches, and geometry survive the duplicate.
+3. Confirm copied slot labels contain the new `derivativeId` and unique original slot names.
+4. Run the CSV runner so Python updates both slots by `{ derivativeId, slot }`.
+5. Export a checkpoint preview and inspect copied slots, text diagnostics, and links.
+
+Do not mark this tool live-validated until that scenario passes through the real bridge, UXP plugin, and InDesign session.
 
 ## Refresh Procedure
 

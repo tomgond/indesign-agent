@@ -45,6 +45,27 @@ The deliverable is editable InDesign structure, not flattened artwork. Preview i
 - Use absolute bounds for layout edits.
 - `resize_item` accepts absolute `bounds`, not `delta`; use `move_item` for delta moves.
 
+## CSV/Table Template Fill Flow
+
+Use this flow when the user has a finished source page and wants many copies with text-only changes.
+
+- Use `duplicate_template_page` by default. It duplicates the complete page through InDesign so images, placed graphics, shapes, styles, swatches, layers, and geometry are preserved as normal duplication allows.
+- Do not use `create_derivative_page` as a full-page copy. It creates a new page and optionally copies labeled editable motifs for creative derivative generation.
+- Require labeled source text frames, for example `{ "slot": "name", "role": "title", "editable": true }`.
+- After duplication, target copied text with `update_text_slot` and `labelQuery: { "derivativeId": "invite_001", "slot": "name" }`.
+- Have a deterministic script read CSV/table values. The model chooses mapping/config once and must not manually copy per-row values.
+- Run `get_workspace_status`, `open_working_copy`, and `validate_active_document_is_working_copy` before mutation; then duplicate per row, update slots, optionally inspect/check/export checkpoint previews, and save.
+- Fail on ambiguous duplicate slots. Keep `textReplacePolicy: "isolatedOnly"`; inspect threaded/shared/raw diagnostics rather than forcing edits.
+- Never use UI/text-edit automation, selection/current-page targeting, raw page indexes as durable identity, or `update_text_slot` with `fit:true`.
+
+Minimal runner:
+
+```bash
+python scripts/fill_template_from_csv.py --csv examples/template_rows.csv --config examples/template_fill_config.json --out fill_result.json
+```
+
+Completion requires processed rows with no row/slot errors. Final visual success still requires preview plus structured inspection; sample checkpoint previews for large batches unless all pages were requested. See `docs/template-generation/csv-template-fill.md`.
+
 ## Base Inspection
 
 Before creating derivatives, inspect enough of the base document to understand:

@@ -12,7 +12,7 @@
     "test:assets": "npm --prefix design-assets-mcp test",
     "start:assets": "npm --prefix design-assets-mcp start",
     "test:bridge": "npm --prefix bridge install && node tests/test-bridge-timeout-dirty-state.js",
-    "test:unit": "node tests/test-template-active-guard.js && node tests/test-template-logs.js && node tests/test-template-readiness.js && node tests/test-template-unit.js && node tests/test-template-reliability.js && node tests/test-preview-image-response.js && node tests/test-asset-materialization.js && npm run test:bridge && node tests/test-uxp-busy-gate.js && node tests/test-template-inspection-bounds.js && node tests/test-template-safe-text-mutation.js && node tests/test-template-derivative-identity.js && node tests/test-template-decorative-bleed-bounds.js"
+    "test:unit": "node tests/test-template-active-guard.js && node tests/test-template-logs.js && node tests/test-template-readiness.js && node tests/test-template-unit.js && node tests/test-template-reliability.js && node tests/test-template-page-duplication.js && python3 tests/test_fill_template_from_csv.py && node tests/test-preview-image-response.js && node tests/test-asset-materialization.js && npm run test:bridge && node tests/test-uxp-busy-gate.js && node tests/test-template-inspection-bounds.js && node tests/test-template-safe-text-mutation.js && node tests/test-template-derivative-identity.js && node tests/test-template-decorative-bleed-bounds.js"
   },
   "keywords": [
     "mcp",

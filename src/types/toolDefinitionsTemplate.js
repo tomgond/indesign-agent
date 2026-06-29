@@ -149,6 +149,21 @@ const derivativeToolDefinitions = [
         }
     },
     {
+        name: 'duplicate_template_page',
+        description: 'Duplicate a complete finished template page through the InDesign DOM, patch copied text-slot labels with derivativeId, and record durable derivative metadata. This is the preferred page-creation tool for CSV/table fill workflows; it does not replace text.',
+        inputSchema: schema({
+            derivativeId: { type: 'string', minLength: 1 },
+            sourcePageIndex: { type: 'integer', minimum: 0 },
+            name: { type: 'string' },
+            relabelSlots: { type: 'boolean', default: true },
+            copyPageLabel: { type: 'boolean', default: false },
+            slotLabelQuery: labelQuerySchema,
+            requireUniqueSlots: { type: 'boolean', default: true },
+            textSafetyMode: { type: 'string', enum: ['preserve_but_guard', 'fresh_text_slots', 'raw'], default: 'preserve_but_guard' },
+            includeObjectSummary: { type: 'boolean', default: true }
+        }, ['derivativeId', 'sourcePageIndex'])
+    },
+    {
         name: 'duplicate_items_to_page',
         description: 'Duplicate real InDesign page items or groups onto a target page. Prefer sourceLabelQueries over raw ids when deriving motifs. Raw text frame duplication is unsafe for later editable text; use textDuplicateMode=skip or fresh unless raw is explicitly required for inspection.',
         inputSchema: schema({

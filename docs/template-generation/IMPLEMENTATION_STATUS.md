@@ -30,6 +30,8 @@ These pieces are complete enough for Node-side use and have local checks:
 - `set_item_layer` for explicit layer moves plus optional front/back repair.
 - `update_text_slot` now rejects `fit:true` before mutation and returns short before/after text evidence.
 - `fit_text_to_frame` nullish/boolean precedence fix plus local regression coverage.
+- `duplicate_template_page` schema/handler with direct full-page duplication, copied-slot relabeling, duplicate-slot rollback, text diagnostics, standard derivative marker creation, and manifest metadata persistence.
+- Dependency-free `scripts/fill_template_from_csv.py` with exact UTF-8/BOM CSV parsing, pre-mutation validation, Streamable HTTP session reuse, durable slot targeting, hashes/result reporting, dry-run, and fake-client tests.
 - Visual-review JSONL append/list and derivative status updates in manifest.
 - Fast Node tests for HTTP transport, workspace safety, bridge timeout dirty-state, UXP busy-gate, and inspection bounds.
 - Live MVP test scaffold that fails clearly without Mac/InDesign/bridge/plugin.
@@ -53,6 +55,7 @@ These tools have best-effort UXP snippets, but they are not complete until teste
 - `export_spread_preview`
 - `create_page`
 - `create_derivative_page`
+- `duplicate_template_page` (handler and schema are locally tested; complete source-page fidelity still requires the live scenario below)
 - `duplicate_items_to_page`
 - `create_text_slot`
 - `create_image_slot`
@@ -155,6 +158,13 @@ Still pending: live Mac/InDesign retest after deployment and deeper fixture-driv
 - Added derivative-page resolution helpers so mutating tools prefer durable `derivativeId` resolution over cached `pageIndex`.
 - Made duplicate-base-motif text handling explicit with skip/fresh/raw modes and defaulted derivative base duplication away from raw text reuse.
 - Added decorative bleed opt-in for bounds validation instead of loosening content-slot checks globally.
+
+## June 29 CSV template-fill pass
+
+- Added the separate `duplicate_template_page` path for finished full-page templates without changing creative `create_derivative_page` behavior.
+- Added a Linux-side CSV runner and examples. Python, not the model, transfers exact row values to `update_text_slot` by `{ derivativeId, slot }`.
+- Added local static/unit coverage for schema registration, marker/manifest/label paths, fit separation, UTF-8 BOM/Hebrew/quoted commas/empty cells, config validation, and fake MCP call sequencing.
+- Live InDesign duplication is still unverified. The required live fixture has a placed image, background shape, styled text slot(s), and an unlabeled decorative item. Duplicate it, update text from CSV, export a checkpoint preview, inspect copied slots and links, and confirm every visible source object plus styles/geometry survived.
 
 ## What it takes to finish
 

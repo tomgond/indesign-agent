@@ -14,6 +14,8 @@ Agent and repo-specific guidance:
 - `.opencode/skills/indesign-mcp-repo/SKILL.md`
 - `.opencode/skills/indesign-template-agent/SKILL.md`
 
+For finished-page duplication with deterministic CSV text filling, see [`docs/template-generation/csv-template-fill.md`](docs/template-generation/csv-template-fill.md).
+
 ---
 
 ## Why UXP vs AppleScript
