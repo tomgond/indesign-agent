@@ -35,7 +35,7 @@ export function loadConfig(overrides: Partial<DesignAssetsConfig> = {}): DesignA
       ?? path.join(cacheDir, 'recraft-ledger.jsonl'),
     recraftApiToken: overrides.recraftApiToken ?? process.env.RECRAFT_API_TOKEN,
     recraftDailyCapUsd: overrides.recraftDailyCapUsd ?? readNumber(process.env.RECRAFT_DAILY_CAP_USD, 1.0),
-    recraftDefaultMaxCostUsd: overrides.recraftDefaultMaxCostUsd ?? readNumber(process.env.RECRAFT_DEFAULT_MAX_COST_USD, 0.1),
+    recraftDefaultMaxCostUsd: overrides.recraftDefaultMaxCostUsd ?? readNumber(process.env.RECRAFT_DEFAULT_MAX_COST_USD, 0.3),
     recraftApiBaseUrl: overrides.recraftApiBaseUrl ?? process.env.RECRAFT_API_BASE_URL ?? 'https://external.api.recraft.ai',
     iconifyApiBaseUrl: overrides.iconifyApiBaseUrl ?? process.env.ICONIFY_API_BASE_URL ?? 'https://api.iconify.design',
     vtracerCommand: overrides.vtracerCommand ?? process.env.VTRACER_COMMAND ?? 'vtracer',
