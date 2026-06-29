@@ -27,9 +27,18 @@ describe('server schema', () => {
     expect(definition('materialize_asset').inputSchema.properties.candidateId).toBeUndefined();
     expect(definition('materialize_asset').inputSchema.anyOf).toBeUndefined();
     expect(definition('search_assets').inputSchema.properties.allowRemote).toBeDefined();
+    expect(definition('generate_vector_asset').inputSchema.properties.prompt).toBeDefined();
+    expect(definition('generate_vector_asset').inputSchema.properties.style).toBeDefined();
+    expect(definition('generate_vector_asset').inputSchema.properties.aspectRatio).toBeDefined();
     expect(definition('generate_vector_asset').inputSchema.properties.maxCostUsd).toBeDefined();
     expect(definition('generate_vector_asset').inputSchema.properties.force).toBeDefined();
     expect(definition('generate_vector_asset').inputSchema.properties.size).toBeDefined();
+    expect(definition('generate_vector_asset').inputSchema.properties.model).toBeDefined();
+    expect(definition('generate_vector_asset').inputSchema.properties.negativePrompt).toBeDefined();
+    expect(definition('generate_vector_asset').inputSchema.properties.seed).toBeDefined();
+    expect(definition('generate_vector_asset').inputSchema.properties.outputEncoding).toBeDefined();
+    expect(definition('generate_vector_asset').inputSchema.properties.includePreview).toBeDefined();
+    expect(definition('generate_vector_asset').inputSchema.properties.allowText).toBeUndefined();
     expect(definition('preview_asset').inputSchema.properties.svgText).toBeDefined();
     expect(definition('preview_asset').inputSchema.properties.svgBase64).toBeDefined();
     expect(definition('vectorize_raster_asset').inputSchema.properties.inputPath).toBeDefined();

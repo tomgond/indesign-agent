@@ -9,6 +9,7 @@ export const assetMetadataSchema = z.object({
   prompt: z.string().optional(),
   model: z.string().optional(),
   style: z.string().optional(),
+  providerWarnings: z.array(z.string()).optional(),
   createdAt: z.string(),
   tags: z.array(z.string()).optional(),
   dimensions: z.object({

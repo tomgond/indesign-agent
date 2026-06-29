@@ -33,7 +33,6 @@ export const generateVectorAssetInputSchema = z.object({
   aspectRatio: z.string().optional(),
   size: z.string().optional(),
   model: z.enum(['recraftv4_1_vector', 'recraftv4_vector', 'recraftv3_vector', 'recraftv2_vector']).optional(),
-  allowText: z.boolean().optional(),
   negativePrompt: z.string().optional(),
   seed: z.number().int().optional(),
   maxCostUsd: z.number().positive(),

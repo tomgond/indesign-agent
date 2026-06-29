@@ -60,11 +60,13 @@ export async function vectorizeWithVTracer(config: DesignAssetsConfig, input: Vt
   }
 
   let rasterPath = input.inputPath ?? null;
-  let tempDir = null;
+  let outputPath: string | null = null;
+  let tempDir: string | null = null;
   try {
     if (input.rasterBase64) {
       tempDir = fs.mkdtempSync('/tmp/design-assets-mcp-');
       rasterPath = `${tempDir}/input.${input.rasterMimeType?.split('/')[1] ?? 'png'}`;
+      outputPath = `${tempDir}/output.svg`;
       const normalized = String(input.rasterBase64).replace(/\s+/g, '');
       if (!/^[A-Za-z0-9+/]+={0,2}$/.test(normalized) || normalized.length % 4 !== 0) {
         return { success: false, error: { code: 'RASTER_BAD_BASE64', message: 'rasterBase64 is not valid base64' } };
@@ -78,6 +80,8 @@ export async function vectorizeWithVTracer(config: DesignAssetsConfig, input: Vt
       }
       fs.writeFileSync(rasterPath, rasterBytes);
     } else if (input.inputPath) {
+      tempDir = fs.mkdtempSync('/tmp/design-assets-mcp-');
+      outputPath = `${tempDir}/output.svg`;
       const allowedRoots = config.allowedInputRoots.length > 0 ? config.allowedInputRoots : [config.cacheDir];
       if (!allowedRoots.some((root) => isInsideRoot(input.inputPath!, root))) {
         return { success: false, error: { code: 'INPUT_PATH_NOT_ALLOWED', message: 'inputPath must stay inside an allowed input root' } };
@@ -90,23 +94,31 @@ export async function vectorizeWithVTracer(config: DesignAssetsConfig, input: Vt
       }
     }
 
-    const traceArgs = [rasterPath!, '--output', '-', '--mode', input.mode ?? 'poster'];
+    if (!rasterPath || !outputPath) {
+      return { success: false, error: { code: 'VTRACER_BAD_INPUT', message: 'Unable to resolve vtracer input or output path' } };
+    }
+
+    const traceArgs = buildTraceArgs(rasterPath, outputPath, input.mode ?? 'poster');
     const traced = await runCommand(config.vtracerCommand, traceArgs, config.vtracerTimeoutMs);
     if (traced.code !== 0) {
       return { success: false, error: { code: 'VTRACER_FAILED', message: traced.stderr || 'vtracer failed' } };
     }
 
-    const sanitized = sanitizeSvg(traced.stdout, { maxBytes: 2 * 1024 * 1024 });
-    const sha256 = bytesSha256(Buffer.from(sanitized.svgText, 'utf8'));
+    if (!fs.existsSync(outputPath)) {
+      return { success: false, error: { code: 'VTRACER_FAILED', message: 'vtracer did not produce an output file' } };
+    }
+    const svgText = fs.readFileSync(outputPath, 'utf8');
+    const finalSanitized = sanitizeSvg(stripSvgPreamble(svgText), { maxBytes: 2 * 1024 * 1024 });
+    const sha256 = bytesSha256(Buffer.from(finalSanitized.svgText, 'utf8'));
     return {
       success: true,
       asset: {
         assetId: `vtracer:${sha256.slice(0, 16)}`,
         encoding: input.outputEncoding ?? 'svgText',
-        svgText: input.outputEncoding === 'base64' ? undefined : sanitized.svgText,
-        svgBase64: input.outputEncoding === 'base64' ? Buffer.from(sanitized.svgText, 'utf8').toString('base64') : undefined,
+        svgText: input.outputEncoding === 'base64' ? undefined : finalSanitized.svgText,
+        svgBase64: input.outputEncoding === 'base64' ? Buffer.from(finalSanitized.svgText, 'utf8').toString('base64') : undefined,
         sha256,
-        byteLength: Buffer.byteLength(sanitized.svgText, 'utf8'),
+        byteLength: Buffer.byteLength(finalSanitized.svgText, 'utf8'),
         recommendedFilename: `${sha256.slice(0, 16)}.svg`,
         metadata: {
           source: 'vtracer',
@@ -115,11 +127,30 @@ export async function vectorizeWithVTracer(config: DesignAssetsConfig, input: Vt
             steps: [step('vtracer-trace', { mode: input.mode ?? 'poster' }, { outputSha256: sha256 })]
           }
         },
-        safetyReport: sanitized.safetyReport,
-        previewPngBase64: input.includePreview ? renderPreview(sanitized.svgText) : undefined
+        safetyReport: finalSanitized.safetyReport,
+        previewPngBase64: input.includePreview ? renderPreview(finalSanitized.svgText) : undefined
       }
     }
   } finally {
     if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+function buildTraceArgs(inputPath: string, outputPath: string, mode: NonNullable<VtracerRequest['mode']>) {
+  const args = ['--input', inputPath, '--output', outputPath];
+  if (mode === 'bw') {
+    args.push('--preset', 'bw');
+  } else if (mode === 'poster') {
+    args.push('--preset', 'poster');
+  } else if (mode === 'photo') {
+    args.push('--preset', 'photo');
+  } else if (mode === 'line-art') {
+    args.push('--preset', 'bw', '--colormode', 'bw');
+  }
+  return args;
+}
+
+function stripSvgPreamble(svgText: string) {
+  const index = svgText.search(/<svg\b/i);
+  return index >= 0 ? svgText.slice(index) : svgText;
 }

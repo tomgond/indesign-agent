@@ -34,6 +34,26 @@ Remote Iconify API search is opt-in through `allowRemote=true`, and remote candi
 
 Rendered PNG previews are capped at 2 MiB. If a preview would exceed the cap, `preview_asset` fails cleanly and `materialize_asset` omits the preview with a warning in the returned safety report.
 
+## Recraft vector compatibility
+
+Live validation confirmed the following Recraft vector request shape for square icon-style assets:
+
+- `model: recraftv4_1_vector`
+- `style: vector_illustration`
+- `aspectRatio: 1:1`
+- `response_format: b64_json`
+
+The public `generate_vector_asset` tool still accepts user-friendly styles such as `icon`, but the adapter normalizes `icon` to `vector_illustration` for `recraftv4_1_vector` and records a provider warning in the returned asset metadata.
+
+The adapter also omits `negativePrompt` for `recraftv4_1_vector` until that shape is validated for the model. The request still succeeds with the prompt text alone, and the omission is recorded as a provider warning.
+
+Known rejected live inputs for `recraftv4_1_vector`:
+
+- `style: icon`
+- `size: 512x512`
+
+Prefer `aspectRatio: 1:1` for square icons. Avoid explicit pixel sizes unless they have been validated for the specific model. The Mac-side materialization path does not need the Recraft API token; it only consumes sanitized SVG/base64 payloads written to `workspace/assets/imports/`.
+
 ## Env
 
 - `RECRAFT_API_TOKEN`

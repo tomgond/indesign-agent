@@ -59,14 +59,13 @@ export const toolDefinitions: any[] = [
   },
   {
     name: 'generate_vector_asset',
-    description: 'Generate a vector asset through Recraft. Requires prompt, maxCostUsd, and force=true.',
+    description: 'Generate a vector asset through Recraft. Requires prompt, maxCostUsd, and force=true. The adapter normalizes user-friendly style and size inputs to provider-compatible vector request shapes.',
     inputSchema: schema({
       prompt: { type: 'string' },
       style: { type: 'string', enum: ['icon', 'logo', 'vector_illustration', 'digital_illustration', 'any'] },
       aspectRatio: { type: 'string' },
       size: { type: 'string' },
       model: { type: 'string', enum: ['recraftv4_1_vector', 'recraftv4_vector', 'recraftv3_vector', 'recraftv2_vector'] },
-      allowText: { type: 'boolean' },
       negativePrompt: { type: 'string' },
       seed: { type: 'integer' },
       maxCostUsd: { type: 'number', exclusiveMinimum: 0 },

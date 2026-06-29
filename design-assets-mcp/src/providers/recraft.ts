@@ -20,6 +20,11 @@ export type RecraftVectorRequest = {
   includePreview?: boolean;
 };
 
+type NormalizedRecraftVectorRequest = {
+  requestBody: Record<string, unknown>;
+  providerWarnings: string[];
+};
+
 export async function requestRecraftVectorAsset(config: DesignAssetsConfig, input: RecraftVectorRequest, fetchImpl: typeof fetch = fetch) {
   if (!input.force) {
     return { success: false, error: { code: 'RECRAFT_FORCE_REQUIRED', message: 'force=true is required' } };
@@ -37,24 +42,25 @@ export async function requestRecraftVectorAsset(config: DesignAssetsConfig, inpu
     return { success: false, error: { code: 'RECRAFT_DAILY_CAP_EXCEEDED', message: 'Daily Recraft cap exceeded' } };
   }
 
+  const normalized = normalizeRecraftVectorRequest(input);
+  if (!normalized.ok) {
+    return {
+      success: false,
+      error: {
+        code: normalized.error.code,
+        message: normalized.error.message
+      }
+    };
+  }
+
   const endpoint = joinUrlPath(config.recraftApiBaseUrl, 'v1/images/generations/vector');
-  const requestBody = compactObject({
-    prompt: input.prompt,
-    n: 1,
-    response_format: 'b64_json',
-    model: input.model ?? 'recraftv4_1_vector',
-    style: normalizeVectorStyle(input.style),
-    size: normalizeVectorSize(input.size ?? input.aspectRatio),
-    negative_prompt: input.negativePrompt,
-    random_seed: input.seed
-  });
   const response = await fetchImpl(endpoint, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${config.recraftApiToken}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(requestBody)
+    body: JSON.stringify(normalized.value.requestBody)
   });
 
   if (!response.ok) {
@@ -82,14 +88,14 @@ export async function requestRecraftVectorAsset(config: DesignAssetsConfig, inpu
   const data = payload.value as Record<string, any>;
   const inlineSvg = extractInlineSvg(data);
   if (inlineSvg) {
-    return finalizeRecraftAsset(config, data, inlineSvg, input);
+    return finalizeRecraftAsset(config, data, inlineSvg, input, normalized.value.providerWarnings);
   }
 
   const base64Candidate = extractBase64Candidate(data);
   if (base64Candidate) {
     const decoded = decodeBase64Candidate(base64Candidate);
     if (decoded.ok && looksLikeSvgText(decoded.value)) {
-      return finalizeRecraftAsset(config, data, decoded.value, input);
+      return finalizeRecraftAsset(config, data, decoded.value, input, normalized.value.providerWarnings);
     }
     return {
       success: false,
@@ -116,11 +122,11 @@ export async function requestRecraftVectorAsset(config: DesignAssetsConfig, inpu
       };
     }
     if (looksLikeSvgText(fetched.value)) {
-      return finalizeRecraftAsset(config, data, fetched.value, input, urlCandidate);
+      return finalizeRecraftAsset(config, data, fetched.value, input, normalized.value.providerWarnings, urlCandidate);
     }
     const urlBase64 = maybeDecodeTextAsBase64(fetched.value);
     if (urlBase64 && looksLikeSvgText(urlBase64)) {
-      return finalizeRecraftAsset(config, data, urlBase64, input, urlCandidate);
+      return finalizeRecraftAsset(config, data, urlBase64, input, normalized.value.providerWarnings, urlCandidate);
     }
     return {
       success: false,
@@ -144,10 +150,196 @@ export async function requestRecraftVectorAsset(config: DesignAssetsConfig, inpu
   };
 }
 
-function finalizeRecraftAsset(config: DesignAssetsConfig, data: Record<string, any>, rawSvg: string, input: RecraftVectorRequest, providerUrl?: string) {
+function normalizeRecraftVectorRequest(input: RecraftVectorRequest):
+  | { ok: true; value: NormalizedRecraftVectorRequest }
+  | { ok: false; error: { code: string; message: string } } {
+  const model = input.model ?? 'recraftv4_1_vector';
+  const providerWarnings: string[] = [];
+  const styleResult = normalizeRecraftVectorStyle(input.style, model);
+  if (styleResult.warning) {
+    providerWarnings.push(styleResult.warning);
+  }
+
+  const sizeResult = normalizeRecraftVectorSize({
+    aspectRatio: input.aspectRatio,
+    size: input.size,
+    model
+  });
+  if (!sizeResult.ok) {
+    return { ok: false, error: sizeResult.error };
+  }
+  if (sizeResult.value.warning) {
+    providerWarnings.push(sizeResult.value.warning);
+  }
+
+  const negativePromptResult = normalizeRecraftNegativePrompt(input.negativePrompt, model);
+  if (negativePromptResult.warning) {
+    providerWarnings.push(negativePromptResult.warning);
+  }
+
+  const requestBody = compactObject({
+    prompt: input.prompt,
+    n: 1,
+    response_format: 'b64_json',
+    model,
+    style: styleResult.value,
+    size: sizeResult.value.size,
+    negative_prompt: negativePromptResult.value,
+    random_seed: input.seed
+  });
+
+  return {
+    ok: true,
+    value: {
+      requestBody,
+      providerWarnings
+    }
+  };
+}
+
+function normalizeRecraftNegativePrompt(negativePrompt: string | undefined, model: string) {
+  if (!negativePrompt?.trim()) {
+    return { value: undefined as string | undefined, warning: undefined as string | undefined };
+  }
+
+  return {
+    value: undefined,
+    warning: `Omitted negativePrompt for ${model}; live Recraft validation rejected negative prompt for this model.`
+  };
+}
+
+function normalizeRecraftVectorStyle(style: string | undefined, model: string) {
+  if (!style || style === 'any') {
+    return { value: undefined as string | undefined, warning: undefined as string | undefined };
+  }
+
+  if (model === 'recraftv4_1_vector' || model === 'recraftv4_vector') {
+    if (style === 'vector_illustration') {
+      return { value: 'vector_illustration', warning: undefined };
+    }
+    if (style === 'icon') {
+      return {
+        value: 'vector_illustration',
+        warning: 'Mapped style icon to vector_illustration for recraftv4_1_vector; style icon was rejected by live Recraft validation.'
+      };
+    }
+    if (style === 'digital_illustration') {
+      return {
+        value: 'vector_illustration',
+        warning: 'Mapped style digital_illustration to vector_illustration for recraftv4_1_vector.'
+      };
+    }
+    if (style === 'logo') {
+      return {
+        value: undefined,
+        warning: 'Omitted style logo for recraftv4_1_vector; not validated for this model.'
+      };
+    }
+  }
+
+  if (model === 'recraftv3_vector') {
+    if (style === 'vector_illustration') {
+      return {
+        value: 'vector_illustration',
+        warning: 'Kept style vector_illustration for recraftv3_vector; compatibility is not live-validated in this adapter.'
+      };
+    }
+    if (style === 'icon') {
+      return {
+        value: undefined,
+        warning: 'Omitted style icon for recraftv3_vector; not validated for this model.'
+      };
+    }
+    if (style === 'digital_illustration') {
+      return {
+        value: undefined,
+        warning: 'Omitted style digital_illustration for recraftv3_vector; not validated for this model.'
+      };
+    }
+    if (style === 'logo') {
+      return {
+        value: undefined,
+        warning: 'Omitted style logo for recraftv3_vector; not validated for this model.'
+      };
+    }
+  }
+
+  if (model === 'recraftv2_vector') {
+    if (style === 'vector_illustration' || style === 'icon' || style === 'digital_illustration' || style === 'logo') {
+      return {
+        value: undefined,
+        warning: `Omitted style ${style} for recraftv2_vector; not validated for this model.`
+      };
+    }
+  }
+
+  return { value: undefined, warning: undefined };
+}
+
+function normalizeRecraftVectorSize(input: { aspectRatio?: string; size?: string; model: string }):
+  | { ok: true; value: { size?: string; warning?: string } }
+  | { ok: false; error: { code: string; message: string } } {
+  const aspectRatio = normalizeSquareRatio(input.aspectRatio);
+  const size = normalizeSquareRatio(input.size);
+
+  if (aspectRatio) {
+    if (size === '512x512') {
+      return {
+        ok: true,
+        value: {
+          size: aspectRatio,
+          warning: 'Ignored size 512x512 because aspectRatio 1:1 is the validated Recraft vector shape.'
+        }
+      };
+    }
+    return { ok: true, value: { size: aspectRatio } };
+  }
+
+  if (!size) {
+    return { ok: true, value: { size: undefined } };
+  }
+
+  if ((input.model === 'recraftv4_1_vector' || input.model === 'recraftv4_vector') && size === '512x512') {
+    return {
+      ok: false,
+      error: {
+        code: 'RECRAFT_SIZE_UNSUPPORTED',
+        message: 'Requested size 512x512 was rejected by live Recraft validation for recraftv4_1_vector; use aspectRatio 1:1 or omit size.'
+      }
+    };
+  }
+
+  return { ok: true, value: { size } };
+}
+
+function normalizeSquareRatio(value?: string) {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  if (trimmed === '1:1') return '1:1';
+  if (/^\d+:\d+$/.test(trimmed) || /^\d+x\d+$/.test(trimmed)) {
+    return trimmed;
+  }
+  return undefined;
+}
+
+function finalizeRecraftAsset(
+  config: DesignAssetsConfig,
+  data: Record<string, any>,
+  rawSvg: string,
+  input: RecraftVectorRequest,
+  providerWarnings: string[],
+  providerUrl?: string
+) {
   const sanitized = sanitizeSvg(rawSvg, { maxBytes: 2 * 1024 * 1024 });
   const sha256 = bytesSha256(Buffer.from(sanitized.svgText, 'utf8'));
   const createdAt = new Date().toISOString();
+  const normalizedStyle = normalizeRecraftVectorStyle(input.style, input.model ?? 'recraftv4_1_vector').value;
+  const normalizedSize = normalizeRecraftVectorSize({
+    aspectRatio: input.aspectRatio,
+    size: input.size,
+    model: input.model ?? 'recraftv4_1_vector'
+  });
+  const normalizedSizeValue = normalizedSize.ok ? normalizedSize.value.size : undefined;
   const output: AssetPayload = {
     assetId: typeof data.id === 'string' ? data.id : `recraft:${sha256.slice(0, 16)}`,
     encoding: input.outputEncoding ?? 'svgText',
@@ -160,13 +352,23 @@ function finalizeRecraftAsset(config: DesignAssetsConfig, data: Record<string, a
       source: 'recraft',
       prompt: input.prompt,
       model: input.model ?? 'recraftv4_1_vector',
-      style: normalizeVectorStyle(input.style),
+      style: normalizedStyle,
+      providerWarnings: providerWarnings.length > 0 ? providerWarnings : undefined,
       providerAssetId: typeof data.id === 'string' ? data.id : undefined,
       providerUrl,
       createdAt,
       provenance: {
         steps: [
-          step('recraft-request', { prompt: input.prompt, style: normalizeVectorStyle(input.style), model: input.model ?? 'recraftv4_1_vector', size: normalizeVectorSize(input.size ?? input.aspectRatio) }, { outputSha256: sha256 })
+          step(
+            'recraft-request',
+            {
+              prompt: input.prompt,
+              style: normalizedStyle,
+              model: input.model ?? 'recraftv4_1_vector',
+              size: normalizedSizeValue
+            },
+            { outputSha256: sha256 }
+          )
         ]
       },
       cost: {
@@ -178,13 +380,16 @@ function finalizeRecraftAsset(config: DesignAssetsConfig, data: Record<string, a
     previewPngBase64: input.includePreview ? renderPreview(sanitized.svgText) : undefined
   } as const;
 
-  appendLedgerEntry({
-    at: createdAt,
-    assetId: output.assetId,
-    requestedUsd: input.maxCostUsd,
-    actualUsd: input.maxCostUsd,
-    model: input.model ?? 'recraftv4_1_vector'
-  }, ensureLedgerPath(config.recraftLedgerPath));
+  appendLedgerEntry(
+    {
+      at: createdAt,
+      assetId: output.assetId,
+      requestedUsd: input.maxCostUsd,
+      actualUsd: input.maxCostUsd,
+      model: input.model ?? 'recraftv4_1_vector'
+    },
+    ensureLedgerPath(config.recraftLedgerPath)
+  );
 
   return { success: true, asset: output };
 }
@@ -196,26 +401,6 @@ function compactObject<T extends Record<string, unknown>>(value: T) {
 function joinUrlPath(baseUrl: string, path: string) {
   const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
   return new URL(path.replace(/^\//, ''), normalizedBase).toString();
-}
-
-function normalizeVectorStyle(style?: string) {
-  if (style === 'digital_illustration') {
-    // Recraft's vector endpoint accepts vector-oriented styles; map the raster-oriented one explicitly.
-    return 'vector_illustration';
-  }
-  if (style === 'icon' || style === 'logo' || style === 'vector_illustration' || style === 'any') {
-    return style;
-  }
-  return undefined;
-}
-
-function normalizeVectorSize(size?: string) {
-  const trimmed = size?.trim();
-  if (!trimmed) return undefined;
-  if (/^\d+:\d+$/.test(trimmed) || /^\d+x\d+$/.test(trimmed)) {
-    return trimmed;
-  }
-  return undefined;
 }
 
 function extractInlineSvg(data: Record<string, any>) {
