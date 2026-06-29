@@ -228,6 +228,30 @@ def require_success(result: dict[str, Any], tool: str) -> dict[str, Any]:
     return result
 
 
+def require_active_working_copy_validation(result: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        raise FillError("validate_active_document_is_working_copy: expected object result")
+    candidate = result.get("result") if isinstance(result.get("result"), dict) else result
+    if not isinstance(candidate, dict):
+        raise FillError("validate_active_document_is_working_copy: expected object result")
+    ok = candidate.get("ok")
+    if ok is True:
+        return candidate
+    if candidate.get("success") is False or ok is False:
+        active_path = candidate.get("activeDocumentPath")
+        working_copy_path = candidate.get("workingCopyPath")
+        detail = candidate.get("error") or candidate.get("message") or "active document is not the working copy"
+        suffix = []
+        if active_path is not None:
+            suffix.append(f"activeDocumentPath={active_path!r}")
+        if working_copy_path is not None:
+            suffix.append(f"workingCopyPath={working_copy_path!r}")
+        if suffix:
+            detail = f"{detail} ({', '.join(suffix)})"
+        raise FillError(f"validate_active_document_is_working_copy: {detail}")
+    raise FillError("validate_active_document_is_working_copy: response did not confirm ok=true")
+
+
 def call(client: Any, tool: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     return require_success(client.call_tool(tool, arguments or {}), tool)
 
@@ -240,6 +264,7 @@ def run_fill(
     collect_errors: bool = False,
     dry_run: bool = False,
     save: bool | None = None,
+    save_on_error: bool = False,
     export_preview: bool | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
@@ -265,7 +290,7 @@ def run_fill(
         client.initialize()
     call(client, "get_workspace_status")
     call(client, "open_working_copy")
-    call(client, "validate_active_document_is_working_copy")
+    require_active_working_copy_validation(call(client, "validate_active_document_is_working_copy"))
 
     fit_slots = config.get("fitSlots", [])
     inspect_after_update = config.get("inspectAfterUpdate", False) is True
@@ -384,11 +409,14 @@ def run_fill(
         if stop:
             break
 
-    if should_save:
+    if should_save and (save_on_error or not result["errors"]):
         try:
             result["saveResult"] = call(client, "save_working_copy")
         except Exception as error:
             result["errors"].append({"rowIndex": None, "rowId": None, "slot": None, "column": None, "tool": "save_working_copy", "error": str(error)})
+    elif should_save and result["errors"]:
+        result["saveSkipped"] = True
+        result["saveSkippedReason"] = "errors_present"
     result["success"] = not result["errors"]
     return result
 
@@ -403,6 +431,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--offset", type=int)
     parser.add_argument("--no-save", action="store_true")
+    parser.add_argument("--save-on-error", action="store_true")
     parser.add_argument("--export-preview", action="store_true")
     return parser
 
@@ -425,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
             collect_errors=args.collect_errors,
             dry_run=args.dry_run,
             save=False if args.no_save else None,
+            save_on_error=args.save_on_error,
             export_preview=True if args.export_preview else None,
         )
         output.update({"csvPath": str(Path(args.csv_path)), "configPath": str(Path(args.config_path))})

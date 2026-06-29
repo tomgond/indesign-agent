@@ -20,7 +20,11 @@ assert.ok(duplicateStart >= 0 && duplicateEnd > duplicateStart, 'duplicate_templ
 const duplicateSlice = source.slice(duplicateStart, duplicateEnd);
 
 assert.match(duplicateSlice, /sourcePage\.duplicate\(\)/);
-assert.match(duplicateSlice, /this\.createDerivativePageMarker/);
+assert.match(duplicateSlice, /derivativeId already exists in workspace manifest/);
+assert.match(duplicateSlice, /derivativeId already exists in document/);
+assert.match(duplicateSlice, /role:\s*'page_marker'/);
+assert.match(duplicateSlice, /marker\.nonprinting\s*=\s*true/);
+assert.match(duplicateSlice, /MCP_METADATA/);
 assert.match(duplicateSlice, /upsertDerivativePage/);
 assert.match(duplicateSlice, /source:\s*'duplicate_template_page'/);
 assert.match(duplicateSlice, /Object\.assign\(\{\}, label, \{/);
@@ -28,8 +32,14 @@ assert.match(duplicateSlice, /derivativeId:\s*args\.derivativeId/);
 assert.match(duplicateSlice, /copiedSlotItems/);
 assert.match(duplicateSlice, /slot:\s*label\.slot/);
 assert.match(duplicateSlice, /textFrameDiagnostics/);
-assert.match(duplicateSlice, /Duplicate text slot names/);
+assert.match(duplicateSlice, /Duplicate slot labels on copied page/);
+assert.match(duplicateSlice, /copiedSlotItems/);
+assert.match(duplicateSlice, /slotItemsByName/);
+assert.match(duplicateSlice, /pageIndexOf\(candidate\.item\)/);
+assert.match(duplicateSlice, /createdPage\.rectangles\.add/);
 assert.match(duplicateSlice, /createdPage\.remove\(\)/);
+assert.doesNotMatch(duplicateSlice, /this\.createDerivativePageMarker/);
+assert.match(duplicateSlice, /fresh_text_slots is not implemented/);
 
 const updateStart = source.indexOf('static update_text_slot');
 const updateEnd = source.indexOf('static move_resize_items', updateStart);

@@ -150,7 +150,7 @@ const derivativeToolDefinitions = [
     },
     {
         name: 'duplicate_template_page',
-        description: 'Duplicate a complete finished template page through the InDesign DOM, patch copied text-slot labels with derivativeId, and record durable derivative metadata. This is the preferred page-creation tool for CSV/table fill workflows; it does not replace text.',
+        description: 'Duplicate a complete finished template page through the InDesign DOM, patch copied text-slot labels with derivativeId, reject duplicate derivativeId values by default, and record durable derivative metadata. This is the preferred page-creation tool for CSV/table fill workflows; it does not replace text.',
         inputSchema: schema({
             derivativeId: { type: 'string', minLength: 1 },
             sourcePageIndex: { type: 'integer', minimum: 0 },

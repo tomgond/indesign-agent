@@ -1001,6 +1001,17 @@ export class TemplateHandlers {
             if (textSafetyMode === 'fresh_text_slots') {
                 throw new Error('textSafetyMode=fresh_text_slots is not implemented; use preserve_but_guard or create fresh slots explicitly with create_text_slot.');
             }
+            const manifest = loadWorkspace();
+            const existingDerivative = (manifest.derivatives || []).find((entry) => entry.derivativeId === args.derivativeId);
+            if (existingDerivative) {
+                throw new Error('derivativeId already exists in workspace manifest: ' + args.derivativeId + ' ' + JSON.stringify({
+                    pageIndex: existingDerivative.pageIndex ?? null,
+                    pageId: existingDerivative.pageId ?? null,
+                    pageName: existingDerivative.pageName || null,
+                    source: existingDerivative.source || null,
+                    status: existingDerivative.status || null
+                }));
+            }
             const payload = {
                 ...args,
                 relabelSlots: args.relabelSlots !== false,
@@ -1009,9 +1020,36 @@ export class TemplateHandlers {
                 includeObjectSummary: args.includeObjectSummary !== false,
                 textSafetyMode
             };
-            const manifest = loadWorkspace();
             const duplicated = await runGuarded(`${jsHelpers()} const args=${q(payload)};
                 const sourcePage = pageByIndex(args.sourcePageIndex);
+                const existingMatches = [];
+                for (const page of arr(doc.pages, (page) => page)) {
+                    const label = readLabel(page);
+                    if (label && label.derivativeId === args.derivativeId) {
+                        existingMatches.push({
+                            objectId: safe(() => page.id, null),
+                            name: safe(() => page.name, null),
+                            type: 'Page',
+                            pageIndex: collectionIndexById(doc.pages, page),
+                            label: clone(label)
+                        });
+                    }
+                }
+                for (const item of arr(doc.allPageItems || doc.pageItems, (item) => item)) {
+                    const label = readLabel(item);
+                    if (label && label.derivativeId === args.derivativeId) {
+                        existingMatches.push({
+                            objectId: safe(() => item.id, null),
+                            name: safe(() => item.name, null),
+                            type: safe(() => item.constructor && item.constructor.name, null),
+                            pageIndex: pageIndexOf(item),
+                            label: clone(label)
+                        });
+                    }
+                }
+                if (existingMatches.length) {
+                    throw new Error('derivativeId already exists in document: ' + args.derivativeId + ' ' + JSON.stringify(existingMatches.slice(0, 10)));
+                }
                 let createdPage = null;
                 try {
                     createdPage = sourcePage.duplicate();
@@ -1051,6 +1089,27 @@ export class TemplateHandlers {
                         copiedSlotItems.push({ item, label });
                     }
 
+                    const duplicateSlotDetails = [];
+                    const slotItemsByName = {};
+                    for (const candidate of copiedSlotItems) {
+                        const slot = candidate.label.slot;
+                        const key = String(slot);
+                        if (!slotItemsByName[key]) slotItemsByName[key] = [];
+                        slotItemsByName[key].push({
+                            objectId: safe(() => candidate.item.id, null),
+                            name: safe(() => candidate.item.name, null),
+                            type: safe(() => candidate.item.constructor && candidate.item.constructor.name, null),
+                            pageIndex: pageIndexOf(candidate.item),
+                            label: clone(candidate.label)
+                        });
+                    }
+                    for (const [slot, items] of Object.entries(slotItemsByName)) {
+                        if (items.length > 1) duplicateSlotDetails.push({ slot, items });
+                    }
+                    if (args.requireUniqueSlots && duplicateSlotDetails.length) {
+                        throw new Error('Duplicate slot labels on copied page: ' + JSON.stringify(duplicateSlotDetails));
+                    }
+
                     const slotCandidates = [];
                     for (const item of pageItems) {
                         if (!isTextFrame(item)) continue;
@@ -1058,16 +1117,6 @@ export class TemplateHandlers {
                         if (typeof label.slot !== 'string' || label.slot.length === 0) continue;
                         if (args.slotLabelQuery && !labelMatches(label, args.slotLabelQuery)) continue;
                         slotCandidates.push({ item, label, diagnostics: textFrameDiagnostics(item, { excerptLimit: 200 }) });
-                    }
-                    const duplicateSlots = [];
-                    const slotCounts = {};
-                    for (const candidate of slotCandidates) {
-                        const slot = candidate.label.slot;
-                        slotCounts[slot] = (slotCounts[slot] || 0) + 1;
-                        if (slotCounts[slot] === 2) duplicateSlots.push(slot);
-                    }
-                    if (args.requireUniqueSlots && duplicateSlots.length) {
-                        throw new Error('Duplicate text slot names on copied page: ' + duplicateSlots.join(', '));
                     }
 
                     const textSlots = [];
@@ -1103,6 +1152,22 @@ export class TemplateHandlers {
                     if (args.textSafetyMode === 'raw' && textSlots.length) warnings.push('textSafetyMode=raw preserves duplicated text state; inspect each slot before replacement.');
                     if (removedCopiedMarkers) warnings.push('Removed ' + removedCopiedMarkers + ' copied metadata page marker(s) before creating the new derivative marker.');
 
+                    const pageIndex = collectionIndexById(doc.pages, createdPage);
+                    let marker = null;
+                    try {
+                        const resolved = resolveBoundsForPage({ pageIndex, bounds: [0, 0, 1, 1], unit: 'pt', coordinateSpace: 'page', rejectOutOfPageBounds: false, maxOutsidePageRatio: 1 });
+                        let layer = safe(() => doc.layers.itemByName('MCP_METADATA'), null);
+                        if (!layer || layer.isValid === false) layer = writableLayer('MCP_METADATA');
+                        layer.printable = false;
+                        marker = createdPage.rectangles.add({ geometricBounds: resolved.documentBounds, itemLayer: layer });
+                        marker.name = String(args.derivativeId) + '__page_marker';
+                        marker.nonprinting = true;
+                        writeLabel(marker, { derivativeId: args.derivativeId, role: 'page_marker', source: 'mcp', nonprinting: true, metadata: true });
+                    } catch (error) {
+                        try { if (createdPage) createdPage.remove(); } catch (removeError) {}
+                        throw error;
+                    }
+
                     const placedGraphics = [];
                     const imageSlots = [];
                     if (args.includeObjectSummary) {
@@ -1116,7 +1181,6 @@ export class TemplateHandlers {
                         }
                     }
                     const bounds = clone(safe(() => createdPage.bounds, null));
-                    const pageIndex = collectionIndexById(doc.pages, createdPage);
                     return {
                         success: true,
                         derivativeId: args.derivativeId,
@@ -1131,6 +1195,7 @@ export class TemplateHandlers {
                         textSlots,
                         imageSlots,
                         placedGraphics,
+                        marker: marker ? { objectId: safe(() => marker.id, null), name: safe(() => marker.name, null), pageIndex } : null,
                         warnings
                     };
                 } catch (error) {
@@ -1138,7 +1203,6 @@ export class TemplateHandlers {
                     throw error;
                 }
             `);
-            await this.createDerivativePageMarker({ derivativeId: args.derivativeId, pageIndex: duplicated.pageIndex });
             upsertDerivativePage(manifest, args.derivativeId, {
                 pageIndex: duplicated.pageIndex,
                 pageId: duplicated.pageId ?? null,

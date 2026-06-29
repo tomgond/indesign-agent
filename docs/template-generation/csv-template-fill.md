@@ -9,7 +9,7 @@ Use this flow when a finished InDesign source page must be copied many times and
 | Tool | Use | Copy behavior |
 | --- | --- | --- |
 | `create_derivative_page` | Creative generated layouts | Creates a new page and optionally copies labeled editable motifs. It is not a complete source-page duplicate. |
-| `duplicate_template_page` | Finished templates with text-only row changes | Duplicates the complete source page through InDesign, preserving its existing images, placed graphics, shapes, styles, swatches, layers, and geometry as normal InDesign duplication allows. It patches copied slot labels for derivative targeting. |
+| `duplicate_template_page` | Finished templates with text-only row changes | Duplicates the complete source page through InDesign, preserving its existing images, placed graphics, shapes, styles, swatches, layers, and geometry as normal InDesign duplication allows. It patches copied slot labels for derivative targeting and rejects duplicate `derivativeId` values by default. A fallback item-by-item duplication path is not implemented yet. |
 
 Do not use `create_derivative_page` as if it copies every object from a finished template page.
 
@@ -34,7 +34,7 @@ Work only in a template workspace working copy. The source page must contain lab
 }
 ```
 
-Slot names must be unique on the copied page by default. An ambiguous duplicate slot is an error, not a best-effort update.
+Slot names must be unique on the copied page across all labeled copied items by default. An ambiguous duplicate slot is an error, not a best-effort update.
 
 ## Recommended Flow
 
@@ -59,7 +59,7 @@ python scripts/fill_template_from_csv.py \
   --out fill_result.json
 ```
 
-Use `--dry-run` first to validate headers, mappings, row IDs, and generated derivative IDs without connecting to MCP or mutating InDesign. `--offset` and `--limit` can restrict a smoke test. `--collect-errors` continues after row/slot failures; the default is fail-fast. `--no-save` overrides `saveWorkingCopy` for a smoke test. `--export-preview` opts into checkpoint preview export.
+Use `--dry-run` first to validate headers, mappings, row IDs, and generated derivative IDs without connecting to MCP or mutating InDesign. `--offset` and `--limit` can restrict a smoke test. `--collect-errors` continues after row/slot failures; the default is fail-fast. `--no-save` overrides `saveWorkingCopy` for a smoke test. `--save-on-error` is an explicit unsafe override that allows saving even when errors were recorded. `--export-preview` opts into checkpoint preview export.
 
 The runner reads CSV with `encoding="utf-8-sig"` and `newline=""`. It does not strip or normalize cells. Quoted commas, Hebrew, empty optional cells, and other exact UTF-8 values are passed directly as `update_text_slot.text`.
 
@@ -108,9 +108,9 @@ The runner never sends `fit: true` to `update_text_slot`.
 
 ## Failure And Result Reporting
 
-Before any InDesign mutation, the runner validates required config keys, CSV headers, non-empty row IDs, safe generated derivative IDs, and uniqueness of all selected derivative IDs. It then checks `/health` and `/bridge-status`, initializes one Streamable HTTP MCP session, opens the working copy, and validates the active document.
+Before any InDesign mutation, the runner validates required config keys, CSV headers, non-empty row IDs, safe generated derivative IDs, and uniqueness of all selected derivative IDs. It then checks `/health` and `/bridge-status`, initializes one Streamable HTTP MCP session, opens the working copy, and validates the active document. A validation response with `ok:false` now stops the run before any page duplication.
 
-`fill_result.json` records row index, row ID, derivative ID, page identity, and each slot's source column, UTF-8 SHA-256, source length, returned object identity, warnings, and errors. Failures include `rowIndex`, `rowId`, `slot`, `column`, `tool`, and `error` where available.
+`fill_result.json` records row index, row ID, derivative ID, page identity, and each slot's source column, UTF-8 SHA-256, source length, returned object identity, warnings, and errors. Failures include `rowIndex`, `rowId`, `slot`, `column`, `tool`, and `error` where available. If `saveWorkingCopy` is enabled but any row/slot/tool error occurred, the runner skips saving by default and records `saveSkipped: true` with `saveSkippedReason: "errors_present"`.
 
 Claim batch completion only when the result reports all selected rows processed and no row/slot errors. This proves deterministic transfer and successful tool calls, not visual correctness. When the final document matters, inspect/export previews and copied link/slot evidence. For large batches, preview samples or checkpoints unless every preview was requested.
 
@@ -122,6 +122,7 @@ Claim batch completion only when the result reports all selected rows processed 
 - Do not carry raw `pageIndex` across mutation steps when `derivativeId` exists.
 - Do not call `update_text_slot` with `fit:true`; fit separately after inspection if explicitly configured.
 - Do not silently continue when copied slot names are ambiguous.
+- Do not save a partially failed batch unless `--save-on-error` is explicitly set.
 - Do not treat threaded/shared/raw duplicated text as normal editable text. `duplicate_template_page` reports text diagnostics, and `update_text_slot` with `isolatedOnly` refuses unsafe stories.
 
 ## Live Validation Checklist
