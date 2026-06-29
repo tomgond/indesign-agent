@@ -66,6 +66,8 @@ python scripts/fill_template_from_csv.py --csv examples/template_rows.csv --conf
 
 Completion requires processed rows with no row/slot errors. Final visual success still requires preview plus structured inspection; sample checkpoint previews for large batches unless all pages were requested. See `docs/template-generation/csv-template-fill.md`.
 
+Live validation on 2026-06-29 covered the real Mac/InDesign/UXP path for full-page duplication, exact CSV transfer, isolated text replacement, separate fit repair, preview checkpoints, layer moves, asset placement, and derivative identity/page-index drift. See `docs/live-mcp-validation.md` for the canonical evidence table.
+
 ## Base Inspection
 
 Before creating derivatives, inspect enough of the base document to understand:

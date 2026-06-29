@@ -126,6 +126,8 @@ Use `scripts/fill_template_from_csv.py` for deterministic table transfer. Python
 
 See `./template-generation/csv-template-fill.md` for configuration, command, failure reporting, and the live-validation checklist. Completion requires no runner row/slot errors; final visual success still requires preview plus structured inspection evidence.
 
+Live validation on 2026-06-29 exercised the real Mac/InDesign/UXP session for `duplicate_template_page`, exact-value CSV fill, isolated text replacement, separate fit repair, preview checkpoints, layer repair, asset placement, and derivative identity/page-index drift. The detailed evidence table lives in `docs/live-mcp-validation.md`.
+
 ## Verification
 
 Run the smallest relevant check:

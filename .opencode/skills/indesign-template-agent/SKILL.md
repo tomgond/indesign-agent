@@ -71,6 +71,8 @@ python scripts/fill_template_from_csv.py --csv examples/template_rows.csv --conf
 
 Claim completion only when the runner reports all selected rows processed with no row/slot errors. Final visual success still requires preview and structured inspection; sample previews for large batches. See `docs/template-generation/csv-template-fill.md`.
 
+Live validation on 2026-06-29 exercised the real Mac/InDesign/UXP path for full-page duplication, exact CSV transfer, isolated text replacement, separate fit repair, preview checkpoints, layer moves, asset placement, and derivative identity/page-index drift. The canonical evidence table is in `docs/live-mcp-validation.md`.
+
 ## Geometry
 
 Template bounds use InDesign order:

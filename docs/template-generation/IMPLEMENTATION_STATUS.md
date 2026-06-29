@@ -1,8 +1,10 @@
 # Template Generation Implementation Status
 
-This is the honest status after the local Linux-only implementation pass.
+This started as the honest status after the local Linux-only implementation pass.
 
-No live Mac/InDesign/UXP plugin validation has been run. Anything that depends on the InDesign DOM is either best-effort or explicitly blocked until a live pass proves the exact API behavior.
+A focused live Mac/InDesign/UXP validation pass ran on 2026-06-29 against the workspace working copy. The table below records what was actually exercised live, what passed, and what remains untested or local-only.
+
+Anything that depends on the InDesign DOM outside the table below is still best-effort or explicitly blocked until a live pass proves the exact API behavior.
 
 ## Complete locally
 
@@ -55,7 +57,7 @@ These tools have best-effort UXP snippets, but they are not complete until teste
 - `export_spread_preview`
 - `create_page`
 - `create_derivative_page`
-- `duplicate_template_page` (handler and schema are locally tested; complete source-page fidelity still requires the live scenario below; direct `sourcePage.duplicate()` is implemented, but an item-by-item fallback path is still pending)
+- `duplicate_template_page` (handler and schema are locally tested; complete source-page fidelity was live-validated on 2026-06-29 for the required fixture shape, but the item-by-item fallback path is still pending)
 - `duplicate_items_to_page`
 - `create_text_slot`
 - `create_image_slot`
@@ -165,7 +167,29 @@ Still pending: live Mac/InDesign retest after deployment and deeper fixture-driv
 - Added duplicate `derivativeId` rejection, in-script marker creation, and all-slot uniqueness checks to `duplicate_template_page`.
 - Added a Linux-side CSV runner and examples. Python, not the model, transfers exact row values to `update_text_slot` by `{ derivativeId, slot }`, and it now refuses to save partial failures by default.
 - Added local static/unit coverage for schema registration, marker/manifest/label paths, fit separation, UTF-8 BOM/Hebrew/quoted commas/empty cells, config validation, active-document validation, save-skipping, and fake MCP call sequencing.
-- Live InDesign duplication is still unverified. The required live fixture has a placed image, background shape, styled text slot(s), and an unlabeled decorative item. Duplicate it, update text from CSV, export a checkpoint preview, inspect copied slots and links, and confirm every visible source object plus styles/geometry survived.
+- Live InDesign duplication is now validated for the required fixture shape. The remaining caveats are documented in the live-validation table below.
+
+## Live validation status, 2026-06-29
+
+| Area                                   | Status   | Evidence | Notes / remaining risk |
+| -------------------------------------- | -------- | -------- | ---------------------- |
+| duplicate_template_page full-page copy | passed   | `live_dup_001`; source page `16`; pageId `7833`; pageIndex `17`; previews `preview_live_dup_001_001`, `preview_live_dup_001_003` | Preserved linked SVG, background shape, decorative oval, two labeled text frames, and marker; live visual sanity checked with checkpoint/review previews. |
+| duplicate derivativeId rejection       | passed   | `derivativeId already exists in workspace manifest: live_dup_001 ...` | No second derivative page was created; `resolve_derivative_page` still returned the original page. |
+| all-slot uniqueness                    | passed   | `Duplicate slot labels on copied page: ...` for `live_dup_duplicate_slot` | Cleanup removed the failed derivative record; no orphan manifest entry remained. |
+| CSV exact-value fill                   | passed   | `fill_result.json`; processed `2`; failed `0`; derivativesCreated `2`; previews `preview_live_csv_001_001`, `preview_live_csv_002_001` | Hebrew, quoted comma, leading/trailing spaces, and empty cell behavior all transferred exactly. |
+| save skip on failure                   | passed   | `fail_result.json`; `saveSkipped: true`; `saveSkippedReason: "errors_present"` | Explicit `--save-on-error` was not run; intentionally skipped to avoid persisting a failed live document. |
+| update_text_slot isolated replacement  | passed   | `Identity Alpha 01` / `Identity Beta 02` before-after evidence on `live_identity_001` and `live_identity_002` | `textReplacePolicy: "isolatedOnly"` held, and `stillOverset: false` after replacement. |
+| fit:true rejection                     | passed   | `update_text_slot no longer supports fit=true; call fit_text_to_frame separately after inspecting the updated text.` | Separate `fit_text_to_frame` call succeeded and stayed non-overset. |
+| layer inspection/move                  | passed   | `objectId 7835` moved from `Layer 1` to `AGENT_WORK`; checkpoint preview `preview_live_dup_001_002` | No unrelated objects were moved; layer visibility stayed sane. |
+| preview quality defaults               | passed   | checkpoint preview resolution `48`; review preview resolution `96` for `live_dup_001` | Confirms cheap checkpoint defaults and opt-in higher quality. |
+| asset SVG materialization/placement    | passed   | `tabler:brand-google-home`; Mac path `/Users/morbendror/InDesignMCPWorkSpace3/assets/imports/tabler:brand-google-home/asset.svg`; placed objectId `8067`; preview `preview_live_asset_001_001` | Linux asset MCP stayed provider-side; Mac materializer consumed only sanitized SVG/base64. |
+| derivative identity / page-index drift  | passed   | `live_identity_001 -> pageId 8338 / pageIndex 23`, `live_identity_002 -> pageId 8410 / pageIndex 24`; previews `preview_live_identity_001_001`, `preview_live_identity_002_001` | Updates were targeted by `derivativeId`; no stale page index was reused for mutation. |
+
+Remaining untested live items:
+
+- Explicit `--save-on-error` override for the CSV runner.
+- Roundtrip/finalization flows on the newly created live derivatives.
+- Any source-page variants that do not include the live fixture's placed image, background shape, styled text, and decorative object mix.
 
 ## What it takes to finish
 

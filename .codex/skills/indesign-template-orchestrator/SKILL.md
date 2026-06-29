@@ -78,6 +78,8 @@ When the request is "duplicate this finished page for each CSV/table row and cha
 
 The source slots should be labeled like `{ "slot": "name", "role": "title", "editable": true }`; duplication patches in the row's `derivativeId`. Completion requires the runner to report all selected rows processed with no row/slot errors. Visual completion still requires preview and structured inspection evidence. See `docs/template-generation/csv-template-fill.md`.
 
+Live validation on 2026-06-29 covered the real Mac/InDesign/UXP path for full-page duplication, exact CSV transfer, isolated text replacement, separate fit repair, preview checkpoints, layer moves, asset placement, and derivative identity/page-index drift. Refer to `docs/live-mcp-validation.md` for the canonical evidence table.
+
 ## Phase Guide
 
 ### 1. Bootstrap

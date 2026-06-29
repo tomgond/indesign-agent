@@ -20,6 +20,8 @@ npm start
 
 The Mac-side InDesign MCP stays file-bound. It accepts sanitized inline SVG/base64 payloads, writes into `workspace/assets/imports/<assetKey>/asset.svg`, and returns the local file path for placement with the existing template tools.
 
+Only the sanitized SVG/base64 payload and metadata belong on the Mac side. Do not forward preview PNG sidecars into `materialize_inline_svg_asset`; keep preview generation on Linux and pass the Mac tool the SVG/base64 asset payload only.
+
 In template mode, place the returned path with `create_image_slot` or `replace_image_in_frame`. `place_file_on_page` is only available when the generic/all tool profile is active on the Mac server.
 
 ## Local Iconify

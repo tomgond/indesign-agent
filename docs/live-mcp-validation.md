@@ -68,9 +68,35 @@ Failed live before these fixes:
 - The focused runner has been updated for both local spawned-server mode and remote `MCP_URL` mode.
 - A local rerun on June 21, 2026 reached the server and bridge, but could not validate handlers because the bridge reported: `Error: Plugin not connected. Open InDesign, then load the Bridge Panel via UXP Developer Tool.`
 - A fresh post-fix remote validation result is still pending because this workspace does not have the private remote `MCP_URL` and writable `MCP_EXPORT_DIR` required to execute the live rerun.
-- `duplicate_template_page` and the Linux CSV runner have local static/unit coverage only. Full-page duplication has not been validated against live InDesign.
+- `duplicate_template_page` and the Linux CSV runner now have live workspace validation recorded below; the earlier remote-baseline note remains pending because the private remote `MCP_URL` and writable `MCP_EXPORT_DIR` are still unavailable here.
 
-## Pending CSV Template Duplication Scenario
+## June 29, 2026 Workspace Validation
+
+This workspace ran a focused live Mac/InDesign/UXP pass against the working copy on 2026-06-29. The tested flows passed as follows:
+
+| Area                                   | Status   | Evidence | Notes / remaining risk |
+| -------------------------------------- | -------- | -------- | ---------------------- |
+| duplicate_template_page full-page copy | passed   | `live_dup_001`; pageId `7833`; pageIndex `17`; previews `preview_live_dup_001_001`, `preview_live_dup_001_003` | Preserved linked SVG, background, decorative oval, two labeled text frames, and marker; live visual sanity checked with checkpoint/review previews. |
+| duplicate derivativeId rejection       | passed   | `derivativeId already exists in workspace manifest: live_dup_001 ...` | No second derivative page was created; `resolve_derivative_page` still returned the original page. |
+| all-slot uniqueness                    | passed   | `Duplicate slot labels on copied page: ...` for `live_dup_duplicate_slot` | Cleanup removed the failed derivative record; no orphan manifest entry remained. |
+| CSV exact-value fill                   | passed   | `fill_result.json`; processed `2`; failed `0`; derivativesCreated `2`; previews `preview_live_csv_001_001`, `preview_live_csv_002_001` | Hebrew, quoted comma, leading/trailing spaces, and empty cell behavior all transferred exactly. |
+| save skip on failure                   | passed   | `fail_result.json`; `saveSkipped: true`; `saveSkippedReason: "errors_present"` | Explicit `--save-on-error` was not run; intentionally skipped to avoid persisting a failed live document. |
+| update_text_slot isolated replacement  | passed   | `Identity Alpha 01` / `Identity Beta 02` before-after evidence on `live_identity_001` and `live_identity_002` | `textReplacePolicy: "isolatedOnly"` held, and `stillOverset: false` after replacement. |
+| fit:true rejection                     | passed   | `update_text_slot no longer supports fit=true; call fit_text_to_frame separately after inspecting the updated text.` | Separate `fit_text_to_frame` call succeeded and stayed non-overset. |
+| layer inspection/move                  | passed   | `objectId 7835` moved from `Layer 1` to `AGENT_WORK`; checkpoint preview `preview_live_dup_001_002` | No unrelated objects were moved; layer visibility stayed sane. |
+| preview quality defaults               | passed   | checkpoint preview resolution `48`; review preview resolution `96` for `live_dup_001` | Confirms cheap checkpoint defaults and opt-in higher quality. |
+| asset SVG materialization/placement    | passed   | `tabler:brand-google-home`; Mac path `/Users/morbendror/InDesignMCPWorkSpace3/assets/imports/tabler:brand-google-home/asset.svg`; placed objectId `8067`; preview `preview_live_asset_001_001` | Linux asset MCP stayed provider-side; Mac materializer consumed only sanitized SVG/base64. |
+| derivative identity / page-index drift  | passed   | `live_identity_001 -> pageId 8338 / pageIndex 23`, `live_identity_002 -> pageId 8410 / pageIndex 24`; previews `preview_live_identity_001_001`, `preview_live_identity_002_001` | Updates were targeted by `derivativeId`; no stale page index was reused for mutation. |
+
+Untested live:
+
+- Explicit `--save-on-error` override for the CSV runner.
+- Roundtrip/finalization flows on the newly created live derivatives.
+- Any source-page variants that do not include the live fixture's placed image, background shape, styled text, and decorative object mix.
+
+## CSV Template Duplication Scenario
+
+The scenario below was completed in the 2026-06-29 workspace validation pass.
 
 Create a source page containing one placed image frame, one background shape, two labeled/styled text slots, and one unlabeled decorative item. Through the template workspace working copy:
 
@@ -80,7 +106,7 @@ Create a source page containing one placed image frame, one background shape, tw
 4. Run the CSV runner so Python updates both slots by `{ derivativeId, slot }`.
 5. Export a checkpoint preview and inspect copied slots, text diagnostics, and links.
 
-Do not mark this tool live-validated until that scenario passes through the real bridge, UXP plugin, and InDesign session.
+The scenario has now passed through the real bridge, UXP plugin, and InDesign session for the live fixture used in this workspace.
 
 ## Refresh Procedure
 
