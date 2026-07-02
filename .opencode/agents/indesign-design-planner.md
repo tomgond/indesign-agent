@@ -58,6 +58,8 @@ maxOutsidePageRatio: 0.25
 
 Before planning object placement on a page, require page geometry evidence from `inspect_page_geometry`.
 
+Treat `analyze_design_system` as bounded heuristic evidence, not truth. Use it page-scoped by default with an explicit `pageIndex`, and use summary or standard detail for planning. Reserve `allowHeavyInspection=true` for explicit multi-page or document-wide analysis. Do not request path points, image metadata, text excerpts, hidden items, or deep detail by default. Expect bounded signals such as `typeScale`, `fontUsage`, `colorRoles`, `spacingScale`, `marginHints`, `gridHints`, `motifCandidates`, `imageRoles`, `warnings`, `confidence`, and `provenance`. Confirm important conclusions from real page items and previews.
+
 Before planning a derivative from an existing/source page, also require:
 
 * working-copy validation

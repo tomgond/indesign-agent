@@ -110,6 +110,10 @@ For derivative generation and layout validation, **use exported previews plus st
 4. Build or repair in small visible batches.
 5. After each visible batch, export a `checkpoint` preview and compare it with structured inspection before continuing.
 
+Use `analyze_design_system` as bounded heuristic evidence for planning, not truth. Call it page-scoped by default with an explicit `pageIndex`, prefer summary or standard detail for planning, and reserve `allowHeavyInspection=true` for explicit multi-page or document-wide analysis. Do not request path points, image metadata, text excerpts, hidden items, or deep detail by default. Expect bounded signals such as `typeScale`, `fontUsage`, `colorRoles`, `spacingScale`, `marginHints`, `gridHints`, `motifCandidates`, `imageRoles`, `warnings`, `confidence`, and `provenance`.
+
+Confirm important conclusions from real page items and previews.
+
 **Mismatch workflow:**
 1. If an exported preview is blank, solid-color, or missing expected content, stop content edits.
 2. Inspect object/layer state and run `diagnose_visual_mismatch`.

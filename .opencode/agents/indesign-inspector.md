@@ -371,3 +371,5 @@ Gather evidence for rubric review without making creative judgments:
 * `productionRisk`: checks, warnings, layers, underlays, missing resources, and roundtrip state
 
 Return evidence and IDs for the critic. Do not assign creative ratings, severity, or redesign direction.
+
+Use `analyze_design_system` as bounded heuristic evidence, not truth. Call it page-scoped by default with an explicit `pageIndex`. Use summary or standard detail for planning, and reserve `allowHeavyInspection=true` for explicit multi-page or document-wide analysis. Do not request path points, image metadata, text excerpts, hidden items, or deep detail by default. Expect bounded signals such as `typeScale`, `fontUsage`, `colorRoles`, `spacingScale`, `marginHints`, `gridHints`, `motifCandidates`, `imageRoles`, `warnings`, `confidence`, and `provenance`. Confirm important conclusions from real page items and previews.

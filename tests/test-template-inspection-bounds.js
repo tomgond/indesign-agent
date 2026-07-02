@@ -113,8 +113,23 @@ function compileInspectionHelpers() {
     assert.equal(hiddenLockedCheck.inputSchema.properties.limit.maximum, 500);
     assert.equal(inspectLayoutGrid.inputSchema.properties.limit.default, 500);
     assert.equal(inspectLayoutGrid.inputSchema.properties.limit.maximum, 500);
-    assert.equal(analyzeDesignSystem.inputSchema.properties.limit.default, 500);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.limit.default, 100);
     assert.equal(analyzeDesignSystem.inputSchema.properties.limit.maximum, 500);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.maxPages.default, 1);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.maxPages.maximum, 5);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.maxItems.default, 100);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.maxItems.maximum, 500);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.detailLevel.default, 'summary');
+    assert.equal(analyzeDesignSystem.inputSchema.properties.includeHidden.default, false);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.includeTextExcerpt.default, false);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.includeImageMetadata.default, false);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.includePathPoints.default, false);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.includeTextMetadata.default, true);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.includeSwatches.default, true);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.includeStyles.default, true);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.allowHeavyInspection.default, false);
+    assert.equal(Array.isArray(analyzeDesignSystem.inputSchema.properties.pageIndexes.items), false);
+    assert.equal(analyzeDesignSystem.inputSchema.properties.pageIndexes.items.type, 'integer');
 }
 
 {
@@ -188,6 +203,7 @@ function compileInspectionHelpers() {
     const parentInfoHelper = sliceBetween(source, 'function parentPageInfo(m,i, options){', 'function itemTypeName(it){');
     const linksBranch = sliceBetween(source, 'function checkMissingLinks(){', 'function checkMissingFonts(){');
     const fontsBranch = sliceBetween(source, 'function checkMissingFonts(){', 'function checkOversetText(options){');
+    const layoutGridBranch = sliceBetween(source, 'static inspect_layout_grid(args = {}) {', 'static analyze_design_system(args = {}) {');
     const designSystemBranch = sliceBetween(source, 'static analyze_design_system(args = {}) {', 'static compare_derivative_state(args = {}) {');
 
     assert.ok(!stylesBranch.includes('doc.allPageItems'));
@@ -218,12 +234,32 @@ function compileInspectionHelpers() {
     assert.ok(!fontsBranch.includes('inspectedItems'));
     assert.ok(fontsBranch.includes('doc.fonts'));
 
-    assert.ok(designSystemBranch.includes("includeTextMetadata: true"));
-    assert.ok(designSystemBranch.includes("detailLevel: 'standard'"));
-    assert.ok(designSystemBranch.includes('includeTextExcerpt: false'));
-    assert.ok(designSystemBranch.includes('includeImageMetadata: false'));
-    assert.ok(designSystemBranch.includes('includePathPoints: false'));
-    assert.ok(designSystemBranch.includes('inspect_layout_grid({ pageIndex, limit: args.limit })'));
+    assert.ok(layoutGridBranch.includes('includeTextExcerpt: false'));
+    assert.ok(layoutGridBranch.includes('includeTextMetadata: false'));
+    assert.ok(layoutGridBranch.includes('includeImageMetadata: false'));
+    assert.ok(layoutGridBranch.includes('includePathPoints: false'));
+    assert.ok(layoutGridBranch.includes('includeParentItems: false'));
+    assert.ok(layoutGridBranch.includes('includeStyles: false'));
+    assert.ok(layoutGridBranch.includes('includeSwatches: false'));
+    assert.ok(layoutGridBranch.includes('includeLayers: false'));
+    assert.ok(layoutGridBranch.includes('includeParents: false'));
+
+    assert.ok(designSystemBranch.includes("includeTextMetadata: args.includeTextMetadata !== false"));
+    assert.ok(designSystemBranch.includes('detailLevel: resolvedDetailLevel'));
+    assert.ok(designSystemBranch.includes('pageIndexes'));
+    assert.ok(designSystemBranch.includes('maxPages'));
+    assert.ok(designSystemBranch.includes('maxItems'));
+    assert.ok(designSystemBranch.includes('allowHeavyInspection=true'));
+    assert.ok(designSystemBranch.includes('includeTextExcerpt: args.includeTextExcerpt === true'));
+    assert.ok(designSystemBranch.includes('includeImageMetadata: args.includeImageMetadata === true'));
+    assert.ok(designSystemBranch.includes('includePathPoints: args.includePathPoints === true && args.allowHeavyInspection === true'));
+    assert.ok(designSystemBranch.includes('inspect_layout_grid'));
+    assert.ok(designSystemBranch.includes('unwrapToolResult(await this.inspect_layout_grid'));
+    assert.ok(designSystemBranch.includes('includePageItems: false'));
+    assert.ok(designSystemBranch.includes('includeStyles: args.includeStyles !== false'));
+    assert.ok(designSystemBranch.includes('includeSwatches: args.includeSwatches !== false'));
+    assert.ok(designSystemBranch.includes('itemEvidenceSample'));
+    assert.ok(designSystemBranch.includes('heuristic_bounded_design_system_analysis'));
 }
 
 {

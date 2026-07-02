@@ -635,10 +635,22 @@ const derivativeToolDefinitions = [
         description: 'Summarize reusable fonts, swatches, motifs, spacing, and recurring geometry from document/page inspection. Heuristic only.',
         inputSchema: schema({
             pageIndex: { type: 'integer', minimum: 0 },
+            pageIndexes: { type: 'array', items: { type: 'integer', minimum: 0 } },
             includeItems: { type: 'boolean' },
             includeMotifs: { type: 'boolean' },
             includeGrid: { type: 'boolean' },
-            limit: { type: 'integer', minimum: 1, maximum: 500, default: 500 }
+            limit: { type: 'integer', minimum: 1, maximum: 500, default: 100 },
+            maxPages: { type: 'integer', minimum: 1, maximum: 5, default: 1 },
+            maxItems: { type: 'integer', minimum: 1, maximum: 500, default: 100 },
+            detailLevel: { type: 'string', enum: ['summary', 'standard', 'deep'], default: 'summary' },
+            includeHidden: { type: 'boolean', default: false },
+            includeTextExcerpt: { type: 'boolean', default: false },
+            includeImageMetadata: { type: 'boolean', default: false },
+            includePathPoints: { type: 'boolean', default: false },
+            includeTextMetadata: { type: 'boolean', default: true },
+            includeSwatches: { type: 'boolean', default: true },
+            includeStyles: { type: 'boolean', default: true },
+            allowHeavyInspection: { type: 'boolean', default: false }
         })
     },
     {

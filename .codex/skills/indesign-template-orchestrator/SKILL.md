@@ -96,6 +96,8 @@ Live validation on 2026-06-29 covered the real Mac/InDesign/UXP path for full-pa
 
 Load [references/inspector.md](references/inspector.md) and produce structured evidence before planning.
 
+Use `analyze_design_system` as bounded heuristic evidence, not truth. Call it page-scoped by default with an explicit `pageIndex`. Use summary or standard detail for planning, and reserve `allowHeavyInspection=true` for explicit multi-page or document-wide analysis. Do not request path points, image metadata, text excerpts, hidden items, or deep detail by default. Expect bounded signals such as `typeScale`, `fontUsage`, `colorRoles`, `spacingScale`, `marginHints`, `gridHints`, `motifCandidates`, `imageRoles`, `warnings`, `confidence`, and `provenance`. Confirm important conclusions from real page items and previews.
+
 ### 3. Plan
 
 Load [references/planner.md](references/planner.md) and turn the inspection evidence into deterministic derivative batches.

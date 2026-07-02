@@ -22,6 +22,8 @@ const templateHandlerSource = fs.readFileSync(new URL('../src/handlers/templateH
 const originalEnsureTemplateReady = TemplateHandlers.ensureTemplateReady;
 const originalResolveDerivativeTarget = TemplateHandlers.resolveDerivativeTarget;
 const originalExecuteViaUXP = ScriptExecutor.executeViaUXP;
+const originalInspectLayoutGrid = TemplateHandlers.inspect_layout_grid;
+const originalUxpTool = TemplateHandlers.uxpTool;
 
 try {
     const manifest = initWorkspace({ originalSourcePath: original, workspaceRoot });
@@ -79,6 +81,21 @@ try {
     assert.match(String(templateToolDefinitions.find((tool) => tool.name === 'update_text_slot').inputSchema.properties.fit.description), /deprecated|reject/i);
     assert.match(String(templateToolDefinitions.find((tool) => tool.name === 'create_text_slot').inputSchema.properties.autoFit.description), /risky|avoid|instability/i);
     assert.equal(templateToolDefinitions.find((tool) => tool.name === 'duplicate_items_to_page').inputSchema.properties.textDuplicateMode.default, 'skip');
+    const analyzeDesignSystemSchema = templateToolDefinitions.find((tool) => tool.name === 'analyze_design_system').inputSchema;
+    assert.equal(analyzeDesignSystemSchema.properties.pageIndex.type, 'integer');
+    assert.equal(analyzeDesignSystemSchema.properties.pageIndexes.type, 'array');
+    assert.equal(analyzeDesignSystemSchema.properties.maxPages.default, 1);
+    assert.equal(analyzeDesignSystemSchema.properties.maxItems.default, 100);
+    assert.equal(analyzeDesignSystemSchema.properties.maxItems.maximum, 500);
+    assert.equal(analyzeDesignSystemSchema.properties.detailLevel.default, 'summary');
+    assert.equal(analyzeDesignSystemSchema.properties.includeHidden.default, false);
+    assert.equal(analyzeDesignSystemSchema.properties.includeTextExcerpt.default, false);
+    assert.equal(analyzeDesignSystemSchema.properties.includeImageMetadata.default, false);
+    assert.equal(analyzeDesignSystemSchema.properties.includePathPoints.default, false);
+    assert.equal(analyzeDesignSystemSchema.properties.includeTextMetadata.default, true);
+    assert.equal(analyzeDesignSystemSchema.properties.includeSwatches.default, true);
+    assert.equal(analyzeDesignSystemSchema.properties.includeStyles.default, true);
+    assert.equal(analyzeDesignSystemSchema.properties.allowHeavyInspection.default, false);
     const visualReviewSchema = templateToolDefinitions.find((tool) => tool.name === 'record_visual_review').inputSchema;
     assert.ok(visualReviewSchema.properties.designQualityRubric);
     assert.ok(visualReviewSchema.properties.designQualityRubric.properties.categories.properties.productionRisk);
@@ -398,11 +415,327 @@ try {
     assert.equal(slotResult.result.link.status, 'normal');
     assert.equal(slotResult.result.warnings.some((warning) => /Assignment to constant variable/i.test(String(warning))), false);
 
+    const analyzeCallLog = [];
+    const analyzePageItems = {
+        0: [
+            {
+                objectId: 11,
+                name: 'headline',
+                type: 'TextFrame',
+                pageIndex: 0,
+                bounds: [12, 18, 42, 198],
+                geometricBounds: [12, 18, 42, 198],
+                visible: true,
+                locked: false,
+                label: { role: 'title', editable: true, motifId: 'motif-title', source: 'base' },
+                text: { overset: false, fontFamily: 'Inter', fontStyle: 'Bold', pointSize: 32, paragraphStyle: 'Headline', characterStyle: 'Headline Char' },
+                image: null,
+                fillColor: { name: 'None' },
+                strokeColor: { name: 'None' },
+                strokeWeight: 0
+            },
+            {
+                objectId: 12,
+                name: 'subhead',
+                type: 'TextFrame',
+                pageIndex: 0,
+                bounds: [50, 18, 70, 180],
+                geometricBounds: [50, 18, 70, 180],
+                visible: true,
+                locked: false,
+                label: { role: 'subtitle', editable: true },
+                text: { overset: false, fontFamily: 'Inter', fontStyle: 'Medium', pointSize: 18, paragraphStyle: 'Subhead', characterStyle: 'Subhead Char' },
+                image: null,
+                fillColor: { name: 'None' },
+                strokeColor: { name: 'None' },
+                strokeWeight: 0
+            },
+            {
+                objectId: 13,
+                name: 'body',
+                type: 'TextFrame',
+                pageIndex: 0,
+                bounds: [78, 18, 140, 180],
+                geometricBounds: [78, 18, 140, 180],
+                visible: true,
+                locked: false,
+                label: { role: 'body', editable: true },
+                text: { overset: false, fontFamily: 'Inter', fontStyle: 'Regular', pointSize: 11, paragraphStyle: 'Body', characterStyle: 'Body Char' },
+                image: null,
+                fillColor: { name: 'None' },
+                strokeColor: { name: 'None' },
+                strokeWeight: 0
+            },
+            {
+                objectId: 14,
+                name: 'hero',
+                type: 'Rectangle',
+                pageIndex: 0,
+                bounds: [22, 198, 120, 320],
+                geometricBounds: [22, 198, 120, 320],
+                visible: true,
+                locked: false,
+                label: { role: 'hero', editable: false },
+                text: null,
+                image: { hasPlacedGraphic: true, linkName: 'hero.jpg', linkPath: '/workspace/assets/hero.jpg', linkStatus: 'Normal', effectivePpi: { x: 300, y: 300 }, actualPpi: { x: 300, y: 300 } },
+                fillColor: { name: 'Paper' },
+                strokeColor: { name: 'None' },
+                strokeWeight: 0
+            }
+        ],
+        1: [
+            {
+                objectId: 21,
+                name: 'support',
+                type: 'TextFrame',
+                pageIndex: 1,
+                bounds: [18, 18, 50, 170],
+                geometricBounds: [18, 18, 50, 170],
+                visible: true,
+                locked: false,
+                label: { role: 'supporting', editable: true },
+                text: { overset: false, fontFamily: 'Inter', fontStyle: 'Regular', pointSize: 11, paragraphStyle: 'Body', characterStyle: 'Body Char' },
+                image: null,
+                fillColor: { name: 'None' },
+                strokeColor: { name: 'None' },
+                strokeWeight: 0
+            },
+            {
+                objectId: 22,
+                name: 'accent-line',
+                type: 'Line',
+                pageIndex: 1,
+                bounds: [60, 20, 61, 200],
+                geometricBounds: [60, 20, 61, 200],
+                visible: true,
+                locked: false,
+                label: { role: 'divider', editable: true, motifId: 'divider-1', source: 'base' },
+                text: null,
+                image: null,
+                fillColor: { name: 'None' },
+                strokeColor: { name: 'Accent Blue' },
+                strokeWeight: 2
+            }
+        ],
+        2: [
+            {
+                objectId: 31,
+                name: 'caption',
+                type: 'TextFrame',
+                pageIndex: 2,
+                bounds: [16, 18, 30, 120],
+                geometricBounds: [16, 18, 30, 120],
+                visible: true,
+                locked: false,
+                label: { role: 'caption', editable: true },
+                text: { overset: false, fontFamily: 'Inter', fontStyle: 'Regular', pointSize: 8, paragraphStyle: 'Caption', characterStyle: 'Caption Char' },
+                image: null,
+                fillColor: { name: 'None' },
+                strokeColor: { name: 'None' },
+                strokeWeight: 0
+            }
+        ]
+    };
+    TemplateHandlers.uxpTool = async (name, args = {}) => {
+        analyzeCallLog.push({ name, args: JSON.parse(JSON.stringify(args)) });
+        if (name === 'inspect_document_bundle') {
+            return {
+                success: true,
+                pages: [
+                    { index: 0, bounds: [0, 0, 200, 320], marginPreferences: { top: 12, left: 18, bottom: 18, right: 18 } },
+                    { index: 1, bounds: [0, 0, 200, 320], marginPreferences: { top: 10, left: 20, bottom: 20, right: 20 } },
+                    { index: 2, bounds: [0, 0, 200, 320], marginPreferences: { top: 14, left: 16, bottom: 16, right: 16 } }
+                ],
+                swatches: [
+                    { name: 'Paper' },
+                    { name: 'Accent Blue' },
+                    { name: 'Black' }
+                ],
+                styles: {
+                    paragraph: [
+                        { name: 'Headline', fillColor: { name: 'Paper' } },
+                        { name: 'Subhead', fillColor: { name: 'Accent Blue' } },
+                        { name: 'Body', fillColor: { name: 'Black' } },
+                        { name: 'Caption', fillColor: { name: 'Black' } }
+                    ],
+                    character: [
+                        { name: 'Headline Char', fillColor: { name: 'Paper' } },
+                        { name: 'Subhead Char', fillColor: { name: 'Accent Blue' } },
+                        { name: 'Body Char', fillColor: { name: 'Black' } },
+                        { name: 'Caption Char', fillColor: { name: 'Black' } }
+                    ],
+                    object: []
+                },
+                layers: [
+                    { name: 'AGENT_WORK' },
+                    { name: 'BASE' }
+                ],
+                fonts: [
+                    { name: 'Inter\tRegular', fontFamily: 'Inter', fontStyle: 'Regular', status: 'normal' },
+                    { name: 'Inter\tBold', fontFamily: 'Inter', fontStyle: 'Bold', status: 'normal' }
+                ],
+                warnings: []
+            };
+        }
+        if (name === 'inspect_page_items_v2') {
+            const items = analyzePageItems[args.pageIndex] || [];
+            const limit = args.limit ?? 500;
+            const sliced = items.slice(0, limit);
+            return {
+                success: true,
+                items: sliced,
+                pagination: {
+                    totalMatched: items.length,
+                    returned: sliced.length,
+                    offset: 0,
+                    limit,
+                    hasMore: items.length > sliced.length
+                },
+                warnings: []
+            };
+        }
+        throw new Error(`Unexpected tool call: ${name}`);
+    };
+    TemplateHandlers.inspect_layout_grid = async (gridArgs = {}) => {
+        analyzeCallLog.push({ name: 'inspect_layout_grid', args: JSON.parse(JSON.stringify(gridArgs)) });
+        return {
+            success: true,
+            source: 'derived_from_page_item_bounds',
+            pageIndex: gridArgs.pageIndex ?? 0,
+            margins: { top: 12, left: 18, bottom: 18, right: 18 },
+            commonX: [18, 198],
+            commonY: [12, 50, 78, 120],
+            commonWidths: [162, 180],
+            commonHeights: [14, 20, 30, 62, 98],
+            spacingRhythm: [8, 10, 18, 20],
+            likelyGrid: { columns: 2, rows: 3, confidence: 0.7, evidenceObjectIds: [11, 12, 13, 14] },
+            warnings: ['Heuristic only; derived from page item bounds, not native grid metadata']
+        };
+    };
+
+    const defaultAnalysis = await TemplateHandlers.analyze_design_system({
+        pageIndex: 0,
+        includeGrid: true,
+        includeItems: false,
+        limit: 4
+    });
+    assert.equal(defaultAnalysis.success, true);
+    assert.equal(defaultAnalysis.result.source, 'heuristic_bounded_design_system_analysis');
+    assert.equal(defaultAnalysis.result.pageScope.requestedPageIndex, 0);
+    assert.deepEqual(defaultAnalysis.result.pageScope.requestedPageIndexes, [0]);
+    assert.deepEqual(defaultAnalysis.result.pageScope.analyzedPageIndexes, [0]);
+    assert.equal(defaultAnalysis.result.pageScope.defaultedPageIndex, false);
+    assert.equal(defaultAnalysis.result.pageScope.allowHeavyInspection, false);
+    assert.equal(defaultAnalysis.result.limits.maxPages, 1);
+    assert.equal(defaultAnalysis.result.limits.maxItems, 4);
+    assert.equal(defaultAnalysis.result.limits.detailLevel, 'standard');
+    assert.equal(defaultAnalysis.result.limits.includeHidden, false);
+    assert.equal(defaultAnalysis.result.limits.includeTextExcerpt, false);
+    assert.equal(defaultAnalysis.result.limits.includeImageMetadata, false);
+    assert.equal(defaultAnalysis.result.limits.includePathPoints, false);
+    assert.equal(defaultAnalysis.result.limits.includeTextMetadata, true);
+    assert.equal(defaultAnalysis.result.truncated, false);
+    assert.match(defaultAnalysis.result.confidence, /^(low|medium|high)$/);
+    assert.ok(defaultAnalysis.result.signals.typeScale.length >= 3);
+    assert.ok(defaultAnalysis.result.signals.fontUsage.families.length >= 1);
+    assert.ok(defaultAnalysis.result.signals.colorRoles.length >= 1);
+    assert.ok(defaultAnalysis.result.signals.spacingScale.commonGaps.length >= 1);
+    assert.ok(defaultAnalysis.result.signals.marginHints.length >= 1);
+    assert.ok(defaultAnalysis.result.signals.gridHints.length >= 1);
+    assert.ok(defaultAnalysis.result.signals.motifCandidates.length >= 1);
+    assert.ok(defaultAnalysis.result.signals.imageRoles.length >= 1);
+    assert.ok(defaultAnalysis.result.provenance.sourcePages.includes(0));
+    assert.equal(defaultAnalysis.result.provenance.bundleIncluded, true);
+    assert.equal(defaultAnalysis.result.provenance.gridIncluded, true);
+    assert.equal(defaultAnalysis.result.provenance.swatchesIncluded, true);
+    assert.equal(defaultAnalysis.result.provenance.stylesIncluded, true);
+    assert.equal(defaultAnalysis.result.items, undefined);
+    assert.equal(Array.isArray(defaultAnalysis.result.itemEvidenceSample), true);
+    assert.equal(defaultAnalysis.result.itemEvidenceSample.length, 0);
+
+    const bundleCall = analyzeCallLog.find((entry) => entry.name === 'inspect_document_bundle');
+    const itemCall = analyzeCallLog.find((entry) => entry.name === 'inspect_page_items_v2');
+    const gridCall = analyzeCallLog.find((entry) => entry.name === 'inspect_layout_grid');
+    assert.ok(bundleCall);
+    assert.ok(itemCall);
+    assert.ok(gridCall);
+    assert.equal(bundleCall.args.includePageItems, false);
+    assert.equal(bundleCall.args.includeParentPageItems, false);
+    assert.equal(bundleCall.args.includeTextExcerpt, false);
+    assert.equal(bundleCall.args.includeStyles, true);
+    assert.equal(bundleCall.args.includeSwatches, true);
+    assert.equal(itemCall.args.pageIndex, 0);
+    assert.equal(itemCall.args.includeHidden, false);
+    assert.equal(itemCall.args.includeParentItems, false);
+    assert.equal(itemCall.args.limit, 4);
+    assert.equal(itemCall.args.offset, 0);
+    assert.equal(itemCall.args.includeImageMetadata, false);
+    assert.equal(itemCall.args.includeTextMetadata, true);
+    assert.equal(itemCall.args.includeTextExcerpt, false);
+    assert.equal(itemCall.args.includePathPoints, false);
+    assert.equal(itemCall.args.detailLevel, 'standard');
+    assert.equal(gridCall.args.pageIndex, 0);
+    assert.equal(gridCall.args.includeHidden, false);
+    assert.equal(gridCall.args.limit, 4);
+
+    analyzeCallLog.length = 0;
+    const sampledAnalysis = await TemplateHandlers.analyze_design_system({
+        pageIndex: 0,
+        includeItems: true,
+        includeGrid: false,
+        limit: 4
+    });
+    assert.equal(sampledAnalysis.success, true);
+    assert.ok(sampledAnalysis.result.itemEvidenceSample.length > 0);
+    assert.ok(sampledAnalysis.result.itemEvidenceSample.length <= 16);
+    assert.equal(sampledAnalysis.result.itemEvidenceSample[0].text?.excerpt, undefined);
+    assert.equal(sampledAnalysis.result.items, undefined);
+
+    const multiPageRefusal = await TemplateHandlers.analyze_design_system({
+        pageIndexes: [0, 1]
+    });
+    assert.equal(multiPageRefusal.success, false);
+    assert.match(String(multiPageRefusal.result), /allowHeavyInspection=true/);
+
+    const heavyAnalysis = await TemplateHandlers.analyze_design_system({
+        pageIndexes: [0, 1, 2],
+        allowHeavyInspection: true,
+        maxPages: 2,
+        maxItems: 3,
+        includeGrid: false
+    });
+    assert.equal(heavyAnalysis.success, true);
+    assert.deepEqual(heavyAnalysis.result.pageScope.analyzedPageIndexes, [0, 1]);
+    assert.equal(heavyAnalysis.result.truncated, true);
+    assert.equal(heavyAnalysis.result.provenance.truncated, true);
+    assert.equal(heavyAnalysis.result.limits.maxPages, 2);
+    assert.equal(heavyAnalysis.result.limits.maxItems, 3);
+    assert.equal(heavyAnalysis.result.provenance.limitsApplied.perPageBudgets.length, 2);
+    assert.equal(heavyAnalysis.result.provenance.limitsApplied.perPageBudgets[0], 2);
+    assert.equal(heavyAnalysis.result.provenance.limitsApplied.perPageBudgets[1], 1);
+
+    const cappedItems = await TemplateHandlers.analyze_design_system({
+        pageIndex: 0,
+        maxItems: 999,
+        includeGrid: false
+    });
+    assert.equal(cappedItems.success, true);
+    assert.equal(cappedItems.result.limits.maxItems, 500);
+
+    const pathPointsRefusal = await TemplateHandlers.analyze_design_system({
+        pageIndex: 0,
+        includePathPoints: true
+    });
+    assert.equal(pathPointsRefusal.success, false);
+    assert.match(String(pathPointsRefusal.result), /includePathPoints requires allowHeavyInspection=true/);
+
     console.log('Template unit tests passed');
 } finally {
     TemplateHandlers.ensureTemplateReady = originalEnsureTemplateReady;
     TemplateHandlers.resolveDerivativeTarget = originalResolveDerivativeTarget;
     ScriptExecutor.executeViaUXP = originalExecuteViaUXP;
+    TemplateHandlers.inspect_layout_grid = originalInspectLayoutGrid;
+    TemplateHandlers.uxpTool = originalUxpTool;
     clearActiveWorkspace();
     if (priorActiveState) fs.writeFileSync(activeStatePath, priorActiveState);
     else fs.rmSync(activeStatePath, { force: true });

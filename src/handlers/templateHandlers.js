@@ -2242,8 +2242,8 @@ export class TemplateHandlers {
 
     static inspect_layout_grid(args = {}) {
         return response((async () => {
-            const items = await this.uxpTool('inspect_page_items_v2', { pageIndex: args.pageIndex ?? 0, includeHidden: args.includeHidden === true, detailLevel: 'summary', limit: args.limit ?? 500, includeTextExcerpt: false, includeTextMetadata: false, includeImageMetadata: false, includePathPoints: false });
-            const bundle = await this.uxpTool('inspect_document_bundle', {});
+            const items = await this.uxpTool('inspect_page_items_v2', { pageIndex: args.pageIndex ?? 0, includeHidden: args.includeHidden === true, detailLevel: 'summary', limit: args.limit ?? 500, includeTextExcerpt: false, includeTextMetadata: false, includeImageMetadata: false, includePathPoints: false, includeParentItems: false });
+            const bundle = await this.uxpTool('inspect_document_bundle', { includeHidden: args.includeHidden === true, includeTextExcerpt: false, allowHeavyInspection: false, includePageItems: false, includeParentPageItems: false, includeStyles: false, includeSwatches: false, includeLayers: false, includeParents: false, includeItemCounts: false, limit: 1, offset: 0 });
             const page = (bundle.pages || []).find((entry) => entry.index === (args.pageIndex ?? 0)) || {};
             const visibleItems = (items.items || []).filter((item) => args.includeHidden || item.visible !== false);
             const xs = visibleItems.flatMap((item) => item.bounds ? [item.bounds[1], item.bounds[3]] : []);
@@ -2259,21 +2259,506 @@ export class TemplateHandlers {
 
     static analyze_design_system(args = {}) {
         return response((async () => {
-            const pageIndex = args.pageIndex ?? 0;
-            const bundle = await this.uxpTool('inspect_document_bundle', {});
-            const items = args.includeItems === false ? { items: [] } : await this.uxpTool('inspect_page_items_v2', { pageIndex, includeHidden: false, includeTextExcerpt: false, includeTextMetadata: true, includeImageMetadata: false, includePathPoints: false, detailLevel: 'standard', limit: args.limit ?? 500 });
-            const grid = args.includeGrid ? await this.inspect_layout_grid({ pageIndex, limit: args.limit }) : null;
-            const visibleItems = items.items || [];
-            const fontCounts = new Map();
+            const hardMaxPages = 5;
+            const normalizeInt = (value, fallback, min, max) => {
+                const parsed = Number(value);
+                if (!Number.isFinite(parsed)) return fallback;
+                return Math.min(max, Math.max(min, Math.trunc(parsed)));
+            };
+            const roundPoint = (value) => Math.round(Number(value) * 2) / 2;
+            const keyPoint = (value) => roundPoint(value).toFixed(1);
+            const formatBounds = (bounds) => Array.isArray(bounds) ? bounds.map((value) => Math.round(Number(value) * 100) / 100) : null;
+            const countBy = (map, key, payload = {}) => {
+                const existing = map.get(key) || { key, count: 0, evidenceObjectIds: [], ...payload };
+                existing.count += 1;
+                if (payload.objectId != null && !existing.evidenceObjectIds.includes(payload.objectId)) existing.evidenceObjectIds.push(payload.objectId);
+                map.set(key, existing);
+                return existing;
+            };
+            const requestedPageIndex = args.pageIndex != null ? Number(args.pageIndex) : null;
+            const requestedPageIndexes = Array.isArray(args.pageIndexes) && args.pageIndexes.length ? args.pageIndexes.map((value) => {
+                const parsed = Number(value);
+                if (!Number.isFinite(parsed) || parsed < 0) throw new Error('pageIndexes must contain non-negative integers');
+                return Math.trunc(parsed);
+            }) : (requestedPageIndex != null ? [Math.trunc(requestedPageIndex)] : [0]);
+            if (requestedPageIndexes.length > 1 && args.allowHeavyInspection !== true) {
+                throw new Error('multi-page design-system analysis requires allowHeavyInspection=true');
+            }
+            const maxPages = normalizeInt(args.maxPages ?? 1, 1, 1, hardMaxPages);
+            const maxItems = normalizeInt(args.maxItems ?? args.limit ?? 100, 100, 1, 500);
+            const defaultedPageIndex = args.pageIndex == null && !Array.isArray(args.pageIndexes);
+            const warnings = [];
+            if (defaultedPageIndex) warnings.push('Defaulted to pageIndex 0 for bounded design-system analysis.');
+            if (args.includeHidden === false || args.includeHidden == null) warnings.push('Hidden/nonprinting items are excluded by default.');
+            if (args.includeTextExcerpt !== true) warnings.push('Text excerpts are omitted by default.');
+            if (args.includeImageMetadata !== true) warnings.push('Image metadata is omitted by default.');
+            if (args.includePathPoints !== true) warnings.push('Path points are omitted by default.');
+            if (args.allowHeavyInspection !== true) warnings.push('Multi-page or document-wide analysis requires allowHeavyInspection=true.');
+            const pageBudgetLimit = Math.min(maxPages, maxItems);
+            const analyzedPageIndexes = requestedPageIndexes.slice(0, pageBudgetLimit);
+            let truncated = analyzedPageIndexes.length < requestedPageIndexes.length;
+            if (truncated) {
+                warnings.push(`Requested page scope was truncated to ${analyzedPageIndexes.length} page(s) by maxPages/maxItems.`);
+            }
+            const rawDetailLevel = args.detailLevel || 'summary';
+            let resolvedDetailLevel = rawDetailLevel;
+            const needsStandard = args.includeTextMetadata !== false || args.includeImageMetadata === true;
+            if (args.includePathPoints === true) {
+                if (args.allowHeavyInspection !== true) throw new Error('includePathPoints requires allowHeavyInspection=true');
+                if (resolvedDetailLevel !== 'deep') {
+                    resolvedDetailLevel = 'deep';
+                    warnings.push('detailLevel was upgraded to deep to collect path points.');
+                }
+            } else if (resolvedDetailLevel === 'summary' && needsStandard) {
+                resolvedDetailLevel = 'standard';
+                warnings.push('detailLevel was upgraded to standard to collect bounded text or image evidence.');
+            }
+            const totalPageBudget = analyzedPageIndexes.length || 1;
+            const basePageBudget = Math.max(1, Math.floor(maxItems / totalPageBudget));
+            const pageBudgets = analyzedPageIndexes.map((_, index) => basePageBudget + (index < (maxItems % totalPageBudget) ? 1 : 0));
+            const bundle = await this.uxpTool('inspect_document_bundle', {
+                includeHidden: args.includeHidden === true,
+                includeTextExcerpt: false,
+                allowHeavyInspection: args.allowHeavyInspection === true,
+                includePageItems: false,
+                includeParentPageItems: false,
+                includeStyles: args.includeStyles !== false,
+                includeSwatches: args.includeSwatches !== false,
+                includeLayers: true,
+                includeParents: false,
+                includeItemCounts: false,
+                limit: maxItems,
+                offset: 0
+            });
+            const pageResults = [];
+            const gridResults = [];
+            for (let index = 0; index < analyzedPageIndexes.length; index += 1) {
+                const pageIndex = analyzedPageIndexes[index];
+                const inspected = await this.uxpTool('inspect_page_items_v2', {
+                    pageIndex,
+                    includeHidden: args.includeHidden === true,
+                    includeParentItems: false,
+                    limit: pageBudgets[index],
+                    offset: 0,
+                    includeImageMetadata: args.includeImageMetadata === true,
+                    includeTextMetadata: args.includeTextMetadata !== false,
+                    includeTextExcerpt: args.includeTextExcerpt === true,
+                    includePathPoints: args.includePathPoints === true && args.allowHeavyInspection === true,
+                    detailLevel: resolvedDetailLevel
+                });
+                const grid = args.includeGrid ? unwrapToolResult(await this.inspect_layout_grid({ pageIndex, includeHidden: args.includeHidden === true, limit: pageBudgets[index] })) : null;
+                pageResults.push({ pageIndex, inspected, grid });
+                if (grid) gridResults.push({ pageIndex, grid });
+            }
+
+            const itemEntries = pageResults.flatMap((pageResult) => (pageResult.inspected.items || []).map((item) => ({ ...item, pageIndex: pageResult.pageIndex })));
+            const allVisibleItems = itemEntries.filter((item) => args.includeHidden === true || item.visible !== false);
+            const pageLookup = new Map((bundle.pages || []).map((page) => [page.index, page]));
+            const stylePages = Array.isArray(bundle.pages) ? bundle.pages : [];
+            const itemCountByPage = {};
+            const totalInspectedItems = pageResults.reduce((sum, pageResult, index) => {
+                const count = pageResult.inspected.items?.length || 0;
+                itemCountByPage[pageResult.pageIndex] = {
+                    returned: count,
+                    totalMatched: pageResult.inspected.pagination?.totalMatched ?? count,
+                    hasMore: pageResult.inspected.pagination?.hasMore === true,
+                    limit: pageResult.inspected.pagination?.limit ?? pageBudgets[index],
+                    truncated: pageResult.inspected.pagination?.hasMore === true
+                };
+                return sum + count;
+            }, 0);
+            if (pageResults.some((pageResult) => pageResult.inspected.pagination?.hasMore === true)) truncated = true;
+            const totalSkippedOrTruncatedItems = pageResults.some((pageResult) => pageResult.inspected.pagination?.hasMore === true)
+                ? null
+                : pageResults.reduce((sum, pageResult) => sum + Math.max(0, (pageResult.inspected.pagination?.totalMatched || 0) - (pageResult.inspected.pagination?.returned || 0)), 0);
+            const fontFamilies = new Map();
+            const fontStyles = new Map();
+            const paragraphStyles = new Map();
+            const characterStyles = new Map();
+            const swatchUsage = new Map();
+            const swatchEvidence = new Map();
+            const typeSizes = new Map();
             const geometryCounts = new Map();
-            for (const item of visibleItems) {
-                if (item.text?.fontFamily) fontCounts.set(item.text.fontFamily, (fontCounts.get(item.text.fontFamily) || 0) + 1);
-                if (item.bounds) {
-                    const key = `${Math.round(item.bounds[3] - item.bounds[1])}x${Math.round(item.bounds[2] - item.bounds[0])}`;
-                    geometryCounts.set(key, { key, count: (geometryCounts.get(key)?.count || 0) + 1, evidenceObjectIds: [...(geometryCounts.get(key)?.evidenceObjectIds || []), item.objectId] });
+            const recurringGeometry = [];
+            const motifCandidates = [];
+            const imageRoles = [];
+            const colorRoles = [];
+            const spacingGaps = new Map();
+            const spacingRhythm = new Map();
+            const pageZones = [];
+            const marginHints = [];
+            const textItemCount = allVisibleItems.filter((item) => /TextFrame/i.test(item.type)).length;
+            const imageItemCount = allVisibleItems.filter((item) => item.image?.hasPlacedGraphic === true).length;
+            const pageBoundsByPage = new Map(stylePages.map((page) => [page.index, page.bounds]));
+            const captureSwatch = (role, swatchName, objectId, extra = {}) => {
+                if (!swatchName) return;
+                const key = `${role}:${swatchName}`;
+                const existing = swatchUsage.get(key) || { role, swatchName, count: 0, evidenceObjectIds: [], ...extra };
+                existing.count += 1;
+                if (objectId != null && !existing.evidenceObjectIds.includes(objectId)) existing.evidenceObjectIds.push(objectId);
+                swatchUsage.set(key, existing);
+                if (objectId != null) swatchEvidence.set(objectId, swatchName);
+            };
+            const isLargeItem = (item) => {
+                const pageBounds = pageBoundsByPage.get(item.pageIndex) || null;
+                const bounds = item.bounds || item.geometricBounds;
+                if (!pageBounds || !Array.isArray(bounds)) return false;
+                const pageArea = Math.max(1, (pageBounds[3] - pageBounds[1]) * (pageBounds[2] - pageBounds[0]));
+                const itemArea = Math.max(0, (bounds[3] - bounds[1]) * (bounds[2] - bounds[0]));
+                return itemArea / pageArea >= 0.75;
+            };
+            for (const item of allVisibleItems) {
+                const bounds = item.bounds || item.geometricBounds || null;
+                if (item.text?.fontFamily) {
+                    const familyKey = item.text.fontFamily;
+                    const family = fontFamilies.get(familyKey) || { name: familyKey, count: 0, styles: [], evidenceObjectIds: [] };
+                    family.count += 1;
+                    if (item.objectId != null && !family.evidenceObjectIds.includes(item.objectId)) family.evidenceObjectIds.push(item.objectId);
+                    if (item.text.fontStyle && !family.styles.includes(item.text.fontStyle)) family.styles.push(item.text.fontStyle);
+                    fontFamilies.set(familyKey, family);
+                }
+                if (item.text?.fontStyle) {
+                    const styleKey = `${item.text.fontFamily || ''}\t${item.text.fontStyle}`;
+                    const style = fontStyles.get(styleKey) || { name: styleKey.trim(), count: 0, evidenceObjectIds: [] };
+                    style.count += 1;
+                    if (item.objectId != null && !style.evidenceObjectIds.includes(item.objectId)) style.evidenceObjectIds.push(item.objectId);
+                    fontStyles.set(styleKey, style);
+                }
+                if (item.text?.paragraphStyle) {
+                    const entry = paragraphStyles.get(item.text.paragraphStyle) || { name: item.text.paragraphStyle, count: 0, evidenceObjectIds: [] };
+                    entry.count += 1;
+                    if (item.objectId != null && !entry.evidenceObjectIds.includes(item.objectId)) entry.evidenceObjectIds.push(item.objectId);
+                    paragraphStyles.set(item.text.paragraphStyle, entry);
+                }
+                if (item.text?.characterStyle) {
+                    const entry = characterStyles.get(item.text.characterStyle) || { name: item.text.characterStyle, count: 0, evidenceObjectIds: [] };
+                    entry.count += 1;
+                    if (item.objectId != null && !entry.evidenceObjectIds.includes(item.objectId)) entry.evidenceObjectIds.push(item.objectId);
+                    characterStyles.set(item.text.characterStyle, entry);
+                }
+                captureSwatch('fill', item.fillColor?.name, item.objectId, { source: 'item_fill' });
+                captureSwatch('stroke', item.strokeColor?.name, item.objectId, { source: 'item_stroke' });
+                captureSwatch('text', item.text?.fillColor?.name, item.objectId, { source: 'text_fill' });
+                captureSwatch('text-stroke', item.text?.strokeColor?.name, item.objectId, { source: 'text_stroke' });
+                if (item.text?.pointSize != null) {
+                    const sizeKey = keyPoint(item.text.pointSize);
+                    const size = typeSizes.get(sizeKey) || { pointSize: roundPoint(item.text.pointSize), count: 0, role: null, evidenceObjectIds: [] };
+                    size.count += 1;
+                    if (item.objectId != null && !size.evidenceObjectIds.includes(item.objectId)) size.evidenceObjectIds.push(item.objectId);
+                    typeSizes.set(sizeKey, size);
+                }
+                if (bounds) {
+                    const key = `${Math.round(bounds[3] - bounds[1])}x${Math.round(bounds[2] - bounds[0])}`;
+                    const geometry = geometryCounts.get(key) || { key, count: 0, evidenceObjectIds: [], bounds: formatBounds(bounds) };
+                    geometry.count += 1;
+                    if (item.objectId != null && !geometry.evidenceObjectIds.includes(item.objectId)) geometry.evidenceObjectIds.push(item.objectId);
+                    geometryCounts.set(key, geometry);
+                }
+                if (item.label?.motifId || item.label?.role === 'motif') {
+                    motifCandidates.push({
+                        motifId: item.label.motifId || null,
+                        role: item.label.role || null,
+                        editable: item.label.editable === true,
+                        source: item.label.source || 'label',
+                        objectId: item.objectId,
+                        name: item.name || null,
+                        type: item.type || null,
+                        pageIndex: item.pageIndex,
+                        bounds: formatBounds(bounds),
+                        confidence: 0.8
+                    });
+                }
+                if (item.label?.editable === true) {
+                    motifCandidates.push({
+                        motifId: item.label.motifId || null,
+                        role: item.label.role || item.type || 'editable',
+                        editable: true,
+                        source: item.label.source || 'editable_label',
+                        objectId: item.objectId,
+                        name: item.name || null,
+                        type: item.type || null,
+                        pageIndex: item.pageIndex,
+                        bounds: formatBounds(bounds),
+                        confidence: 0.7
+                    });
+                }
+                if (item.image?.hasPlacedGraphic === true) {
+                    const pageBounds = pageBoundsByPage.get(item.pageIndex) || null;
+                    const areaRatio = pageBounds && bounds ? Math.max(0, (bounds[3] - bounds[1]) * (bounds[2] - bounds[0])) / Math.max(1, (pageBounds[3] - pageBounds[1]) * (pageBounds[2] - pageBounds[0])) : null;
+                    const topPosition = bounds && pageBounds ? (bounds[0] - pageBounds[0]) / Math.max(1, pageBounds[2] - pageBounds[0]) : null;
+                    const leftPosition = bounds && pageBounds ? (bounds[1] - pageBounds[1]) / Math.max(1, pageBounds[3] - pageBounds[1]) : null;
+                    const labelRole = item.label?.role || null;
+                    let role = labelRole;
+                    if (!role) {
+                        if (areaRatio != null && areaRatio >= 0.75) role = 'background';
+                        else if (areaRatio != null && areaRatio >= 0.2 && (topPosition == null || topPosition <= 0.45)) role = 'hero';
+                        else if (areaRatio != null && areaRatio <= 0.1 && (topPosition == null || topPosition <= 0.2 || leftPosition <= 0.2)) role = 'logo';
+                        else role = 'supporting';
+                    }
+                    imageRoles.push({
+                        role,
+                        objectId: item.objectId,
+                        name: item.name || null,
+                        type: item.type || null,
+                        pageIndex: item.pageIndex,
+                        bounds: formatBounds(bounds),
+                        labelHint: labelRole,
+                        linkName: item.image.linkName || null,
+                        confidence: role === 'background' || role === 'logo' ? 0.8 : 0.55
+                    });
+                }
+                if (bounds) {
+                    const pageBounds = pageBoundsByPage.get(item.pageIndex) || null;
+                    const page = pageLookup.get(item.pageIndex) || null;
+                    if (pageBounds && !pageZones.some((zone) => zone.pageIndex === item.pageIndex)) {
+                        pageZones.push({
+                            pageIndex: item.pageIndex,
+                            pageBounds: formatBounds(pageBounds),
+                            contentBounds: null,
+                            marginHints: page?.marginPreferences || null
+                        });
+                    }
                 }
             }
-            return { success:true, source:'derived_from_document_inspection', fonts:[...fontCounts.entries()].map(([name,count])=>({ name, count })).sort((a,b)=>b.count-a.count), swatches:(bundle.swatches || []).map((swatch)=>({ name: swatch.name, evidence: 'document_swatches' })), textHierarchy:visibleItems.filter((item)=>item.text?.pointSize).map((item)=>({ pointSize:item.text.pointSize, paragraphStyle:item.text.paragraphStyle, objectId:item.objectId, confidence:0.6 })).slice(0,24), recurringGeometry:[...geometryCounts.values()].filter((entry)=>entry.count > 1), motifs:args.includeMotifs ? visibleItems.filter((item)=>item.label?.motifId).map((item)=>({ motifId:item.label.motifId, objectId:item.objectId, confidence:0.7 })) : [], likelyReusableObjects:visibleItems.filter((item)=>item.label?.editable === true).map((item)=>({ objectId:item.objectId, name:item.name, reason:'editable_label' })), pageZones:grid ? [{ pageIndex, likelyGrid:grid.likelyGrid, spacingRhythm:grid.spacingRhythm }] : [], spacingRhythm:grid?.spacingRhythm || [], warnings:['Heuristic summary of existing design signals only; does not infer creative intent'] };
+            for (const zone of pageZones) {
+                const bounds = allVisibleItems.filter((item) => item.pageIndex === zone.pageIndex && item.bounds).map((item) => item.bounds);
+                if (!bounds.length) continue;
+                const top = Math.min(...bounds.map((b) => b[0]));
+                const left = Math.min(...bounds.map((b) => b[1]));
+                const bottom = Math.max(...bounds.map((b) => b[2]));
+                const right = Math.max(...bounds.map((b) => b[3]));
+                zone.contentBounds = [Math.round(top * 100) / 100, Math.round(left * 100) / 100, Math.round(bottom * 100) / 100, Math.round(right * 100) / 100];
+                const pageBounds = zone.pageBounds;
+                zone.margins = pageBounds ? {
+                    top: Math.round((top - pageBounds[0]) * 100) / 100,
+                    left: Math.round((left - pageBounds[1]) * 100) / 100,
+                    bottom: Math.round((pageBounds[2] - bottom) * 100) / 100,
+                    right: Math.round((pageBounds[3] - right) * 100) / 100
+                } : null;
+                marginHints.push({
+                    pageIndex: zone.pageIndex,
+                    margins: zone.margins,
+                    confidence: zone.margins ? 0.55 : 0.2,
+                    evidenceObjectIds: allVisibleItems.filter((item) => item.pageIndex === zone.pageIndex).slice(0, 6).map((item) => item.objectId)
+                });
+            }
+            const positionsByPage = new Map();
+            for (const item of allVisibleItems) {
+                if (!item.bounds || isLargeItem(item)) continue;
+                const list = positionsByPage.get(item.pageIndex) || [];
+                list.push(item);
+                positionsByPage.set(item.pageIndex, list);
+            }
+            for (const [pageIndex, list] of positionsByPage.entries()) {
+                const sortedX = [...list].sort((a, b) => (a.bounds[1] - b.bounds[1]) || (a.bounds[3] - b.bounds[3]));
+                const sortedY = [...list].sort((a, b) => (a.bounds[0] - b.bounds[0]) || (a.bounds[2] - b.bounds[2]));
+                const edgePairs = [];
+                for (let i = 1; i < sortedX.length; i += 1) edgePairs.push({ gap: Math.max(0, roundPoint(sortedX[i].bounds[1] - sortedX[i - 1].bounds[3])), evidenceObjectIds: [sortedX[i - 1].objectId, sortedX[i].objectId] });
+                for (let i = 1; i < sortedY.length; i += 1) edgePairs.push({ gap: Math.max(0, roundPoint(sortedY[i].bounds[0] - sortedY[i - 1].bounds[2])), evidenceObjectIds: [sortedY[i - 1].objectId, sortedY[i].objectId] });
+                for (const pair of edgePairs) {
+                    if (!(pair.gap > 0)) continue;
+                    const key = keyPoint(pair.gap);
+                    const entry = spacingGaps.get(key) || { value: roundPoint(pair.gap), count: 0, evidenceObjectIds: [] };
+                    entry.count += 1;
+                    for (const id of pair.evidenceObjectIds) if (id != null && !entry.evidenceObjectIds.includes(id)) entry.evidenceObjectIds.push(id);
+                    spacingGaps.set(key, entry);
+                }
+            }
+            const gridHints = [];
+            for (const { pageIndex, grid } of gridResults) {
+                gridHints.push({
+                    pageIndex,
+                    commonX: grid.commonX || [],
+                    commonY: grid.commonY || [],
+                    commonWidths: grid.commonWidths || [],
+                    commonHeights: grid.commonHeights || [],
+                    spacingRhythm: grid.spacingRhythm || [],
+                    likelyGrid: grid.likelyGrid || null,
+                    confidence: grid.likelyGrid?.confidence ?? 0.25,
+                    evidenceObjectIds: grid.likelyGrid?.evidenceObjectIds || []
+                });
+            }
+            if (!gridHints.length) {
+                for (const [pageIndex, list] of positionsByPage.entries()) {
+                    const xs = [...new Set(list.flatMap((item) => [item.bounds[1], item.bounds[3]]).map((value) => Math.round(Number(value) * 2) / 2))].sort((a, b) => a - b);
+                    const ys = [...new Set(list.flatMap((item) => [item.bounds[0], item.bounds[2]]).map((value) => Math.round(Number(value) * 2) / 2))].sort((a, b) => a - b);
+                    const widths = [...new Set(list.map((item) => Math.round((item.bounds[3] - item.bounds[1]) * 2) / 2))].sort((a, b) => a - b);
+                    const heights = [...new Set(list.map((item) => Math.round((item.bounds[2] - item.bounds[0]) * 2) / 2))].sort((a, b) => a - b);
+                    const rhythm = [...new Set([...xs, ...ys].slice(1).map((value, index, arr) => index ? Math.round((value - arr[index - 1]) * 2) / 2 : null).filter((value) => Number.isFinite(value) && value > 0))].sort((a, b) => a - b);
+                    gridHints.push({
+                        pageIndex,
+                        commonX: xs.slice(0, 16),
+                        commonY: ys.slice(0, 16),
+                        commonWidths: widths.slice(0, 16),
+                        commonHeights: heights.slice(0, 16),
+                        spacingRhythm: rhythm.slice(0, 16),
+                        likelyGrid: { columns: xs.length, rows: ys.length, confidence: list.length >= 3 ? 0.35 : 0.15, evidenceObjectIds: list.slice(0, 6).map((item) => item.objectId) },
+                        confidence: list.length >= 3 ? 0.35 : 0.15,
+                        evidenceObjectIds: list.slice(0, 6).map((item) => item.objectId)
+                    });
+                }
+            }
+            const gridHintsByPage = new Map(gridHints.map((entry) => [entry.pageIndex, entry]));
+            for (const zone of pageZones) {
+                const gridHint = gridHintsByPage.get(zone.pageIndex) || null;
+                zone.likelyGrid = gridHint?.likelyGrid || null;
+                zone.spacingRhythm = gridHint?.spacingRhythm || [];
+            }
+            const fontUsage = {
+                families: [...fontFamilies.values()].sort((a, b) => b.count - a.count).slice(0, 16),
+                styles: [...fontStyles.values()].sort((a, b) => b.count - a.count).slice(0, 16),
+                paragraphStyles: [...paragraphStyles.values()].sort((a, b) => b.count - a.count).slice(0, 16),
+                characterStyles: [...characterStyles.values()].sort((a, b) => b.count - a.count).slice(0, 16)
+            };
+            const typeScale = [...typeSizes.values()].sort((a, b) => b.count - a.count || b.pointSize - a.pointSize).map((entry, index) => ({
+                pointSize: entry.pointSize,
+                count: entry.count,
+                role: index === 0 ? (entry.pointSize >= 24 ? 'display' : 'heading') : index === 1 ? 'heading' : index === 2 ? 'subheading' : entry.pointSize <= 10 ? 'caption' : 'body',
+                evidenceObjectIds: entry.evidenceObjectIds.slice(0, 8),
+                confidence: entry.count >= 2 ? 0.7 : 0.45
+            }));
+            const swatches = [...swatchUsage.values()].sort((a, b) => b.count - a.count).map((entry) => ({ role: entry.role, swatchName: entry.swatchName, count: entry.count, evidenceObjectIds: entry.evidenceObjectIds.slice(0, 8), source: entry.source }));
+            const colorRoleSummary = [
+                { role: 'text', swatches: swatches.filter((entry) => entry.role === 'text' || entry.role === 'fill').slice(0, 8), confidence: swatches.some((entry) => entry.role === 'text') ? 0.7 : 0.45 },
+                { role: 'border', swatches: swatches.filter((entry) => entry.role === 'stroke' || entry.role === 'text-stroke').slice(0, 8), confidence: swatches.some((entry) => entry.role === 'stroke') ? 0.65 : 0.4 },
+                { role: 'accent', swatches: swatches.filter((entry) => entry.role === 'fill').slice(0, 8), confidence: swatches.some((entry) => entry.role === 'fill') ? 0.55 : 0.3 },
+                { role: 'background', swatches: swatches.filter((entry) => entry.role === 'fill' && allVisibleItems.some((item) => item.objectId && entry.evidenceObjectIds.includes(item.objectId) && isLargeItem(item))).slice(0, 8), confidence: swatches.some((entry) => entry.role === 'fill' && allVisibleItems.some((item) => item.objectId && entry.evidenceObjectIds.includes(item.objectId) && isLargeItem(item))) ? 0.75 : 0.35 }
+            ].filter((entry) => entry.swatches.length || entry.confidence >= 0.45);
+            const recurringGeometrySummary = [...geometryCounts.values()].filter((entry) => entry.count > 1).slice(0, 24);
+            const motifGeometryCandidates = recurringGeometrySummary.map((entry) => ({ motifId: `geometry:${entry.key}`, role: 'repeated-geometry', editable: false, source: 'recurring_geometry', objectId: entry.evidenceObjectIds[0] || null, name: null, type: null, bounds: entry.bounds, count: entry.count, confidence: 0.55 }));
+            const motifLabelCandidates = motifCandidates.slice(0, 24);
+            const motifSummary = [...motifLabelCandidates, ...motifGeometryCandidates].slice(0, 32);
+            const likelyReusableObjects = allVisibleItems.filter((item) => item.label?.editable === true).map((item) => ({ objectId: item.objectId, name: item.name, reason: item.label?.source || 'editable_label' })).slice(0, 32);
+            const spacingRhythmSummary = [...spacingGaps.values()].sort((a, b) => b.count - a.count || a.value - b.value).slice(0, 16);
+            const imageRoleSummary = imageRoles.slice(0, 16);
+            const inspectedObjectIdsBySignal = {
+                typeScale: typeScale.flatMap((entry) => entry.evidenceObjectIds || []),
+                fontUsage: fontUsage.families.flatMap((entry) => entry.evidenceObjectIds || []).slice(0, 24),
+                colorRoles: swatches.flatMap((entry) => entry.evidenceObjectIds || []).slice(0, 24),
+                spacingScale: spacingRhythmSummary.flatMap((entry) => entry.evidenceObjectIds || []).slice(0, 24),
+                marginHints: marginHints.flatMap((entry) => entry.evidenceObjectIds || []).slice(0, 24),
+                gridHints: gridHints.flatMap((entry) => entry.evidenceObjectIds || []).slice(0, 24),
+                motifCandidates: motifSummary.flatMap((entry) => [entry.objectId].filter((value) => value != null)).slice(0, 24),
+                imageRoles: imageRoleSummary.flatMap((entry) => [entry.objectId].filter((value) => value != null)).slice(0, 24)
+            };
+            const signalAgreement = [typeScale.length > 0, fontUsage.families.length > 0, swatches.length > 0, spacingRhythmSummary.length > 0, gridHints.length > 0].filter(Boolean).length;
+            const sampleCount = allVisibleItems.length;
+            let confidenceScore = 0.42;
+            if (sampleCount >= 8) confidenceScore += 0.12;
+            if (textItemCount >= 3) confidenceScore += 0.12;
+            if (typeScale.length >= 3) confidenceScore += 0.12;
+            if (signalAgreement >= 4) confidenceScore += 0.1;
+            if (truncated || pageResults.some((pageResult) => pageResult.inspected.pagination?.hasMore === true)) confidenceScore -= 0.18;
+            if (sampleCount < 3) confidenceScore -= 0.12;
+            confidenceScore = Math.max(0.1, Math.min(0.9, confidenceScore));
+            const confidence = confidenceScore >= 0.7 ? 'high' : confidenceScore >= 0.45 ? 'medium' : 'low';
+            if (sampleCount < 3) warnings.push('Low sample count reduces design-system confidence.');
+            if (truncated) warnings.push('Requested pages or item budget were truncated to stay bounded.');
+            if (pageResults.some((pageResult) => pageResult.inspected.pagination?.hasMore === true)) warnings.push('Item results were truncated by maxItems.');
+            const itemEvidenceSample = args.includeItems === false ? [] : allVisibleItems.slice(0, Math.min(16, maxItems)).map((item) => ({
+                objectId: item.objectId,
+                name: item.name,
+                type: item.type,
+                pageIndex: item.pageIndex,
+                bounds: item.bounds || item.geometricBounds || null,
+                label: item.label || {},
+                text: item.text ? {
+                    overset: item.text.overset === true,
+                    fontFamily: item.text.fontFamily || null,
+                    fontStyle: item.text.fontStyle || null,
+                    pointSize: item.text.pointSize || null,
+                    paragraphStyle: item.text.paragraphStyle || null,
+                    characterStyle: item.text.characterStyle || null,
+                    excerpt: args.includeTextExcerpt === true ? item.text.excerpt || null : undefined
+                } : null,
+                image: item.image ? (args.includeImageMetadata === true ? item.image : { hasPlacedGraphic: item.image.hasPlacedGraphic === true }) : null,
+                fillColor: item.fillColor || null,
+                strokeColor: item.strokeColor || null,
+                strokeWeight: item.strokeWeight ?? null
+            })).map((item) => {
+                if (item.text && item.text.excerpt === undefined) delete item.text.excerpt;
+                return item;
+            });
+            const signals = {
+                typeScale,
+                fontUsage,
+                colorRoles: colorRoleSummary,
+                spacingScale: {
+                    commonGaps: spacingRhythmSummary,
+                    commonWidthHeights: recurringGeometrySummary.map((entry) => ({ key: entry.key, count: entry.count, evidenceObjectIds: entry.evidenceObjectIds.slice(0, 8), bounds: entry.bounds })),
+                    confidence: spacingRhythmSummary.length >= 2 ? 'medium' : 'low'
+                },
+                marginHints,
+                gridHints,
+                motifCandidates: motifSummary,
+                imageRoles: imageRoleSummary
+            };
+            const pageScope = {
+                requestedPageIndex,
+                requestedPageIndexes: requestedPageIndexes.slice(),
+                analyzedPageIndexes,
+                defaultedPageIndex,
+                allowHeavyInspection: args.allowHeavyInspection === true
+            };
+            const limits = {
+                maxPages,
+                maxItems,
+                detailLevel: resolvedDetailLevel,
+                includeHidden: args.includeHidden === true,
+                includeTextExcerpt: args.includeTextExcerpt === true,
+                includeImageMetadata: args.includeImageMetadata === true,
+                includePathPoints: args.includePathPoints === true && args.allowHeavyInspection === true,
+                includeTextMetadata: args.includeTextMetadata !== false,
+                totalInspectedItems,
+                totalSkippedOrTruncatedItems
+            };
+            const provenance = {
+                sourcePages: analyzedPageIndexes.slice(),
+                inspectedCountsByPage: itemCountByPage,
+                evidenceObjectIdsBySignal: inspectedObjectIdsBySignal,
+                bundleIncluded: true,
+                gridIncluded: args.includeGrid === true,
+                swatchesIncluded: args.includeSwatches !== false,
+                stylesIncluded: args.includeStyles !== false,
+                truncated,
+                limitsApplied: {
+                    maxPages,
+                    maxItems,
+                    detailLevel: resolvedDetailLevel,
+                    includeHidden: args.includeHidden === true,
+                    includeTextExcerpt: args.includeTextExcerpt === true,
+                    includeImageMetadata: args.includeImageMetadata === true,
+                    includePathPoints: args.includePathPoints === true && args.allowHeavyInspection === true,
+                    includeTextMetadata: args.includeTextMetadata !== false,
+                    pageBudgetLimit,
+                    perPageBudgets: pageBudgets,
+                    totalInspectedItems,
+                    totalSkippedOrTruncatedItems
+                },
+                confidenceScore
+            };
+            return {
+                success: true,
+                source: 'heuristic_bounded_design_system_analysis',
+                pageScope,
+                limits,
+                truncated,
+                confidence,
+                signals,
+                warnings,
+                provenance,
+                fonts: fontUsage.families,
+                swatches,
+                textHierarchy: typeScale,
+                recurringGeometry: recurringGeometrySummary,
+                motifs: motifSummary,
+                likelyReusableObjects,
+                pageZones,
+                spacingRhythm: spacingRhythmSummary.map((entry) => entry.value),
+                itemEvidenceSample,
+                colorRoles: colorRoleSummary,
+                imageRoles: imageRoleSummary
+            };
         })(), 'analyze_design_system');
     }
 

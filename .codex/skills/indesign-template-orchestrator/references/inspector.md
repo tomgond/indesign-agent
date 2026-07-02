@@ -57,6 +57,8 @@ Gather evidence for the shared rubric without making creative judgments:
 
 Return facts and evidence IDs for critic consumption. Do not assign design ratings, severity, or creative repair direction.
 
+Use `analyze_design_system` as bounded heuristic evidence, not truth. Call it page-scoped by default with an explicit `pageIndex`. Use summary or standard detail for planning, and reserve `allowHeavyInspection=true` for explicit multi-page or document-wide analysis. Do not request path points, image metadata, text excerpts, hidden items, or deep detail by default. Expect bounded signals such as `typeScale`, `fontUsage`, `colorRoles`, `spacingScale`, `marginHints`, `gridHints`, `motifCandidates`, `imageRoles`, `warnings`, `confidence`, and `provenance`. Confirm important conclusions from real page items and previews.
+
 ## Protocol
 
 1. Validate workspace state with `get_workspace_status` and `validate_active_document_is_working_copy`.

@@ -67,6 +67,7 @@ Non-negotiable rules:
 12. Before planning a derivative from an existing page, require a source/base-page checkpoint preview and use it as the visual anchor.
 13. Pick one explicit layer strategy before building and do not place full-page backgrounds above source text, source motifs, or duplicated content.
 14. If one or two targeted repairs do not improve the preview, or known-good text becomes uncertain, rollback or replan instead of compounding salvage edits.
+15. Treat `analyze_design_system` as bounded heuristic evidence, not truth. Call it page-scoped by default with an explicit `pageIndex`, use summary or standard detail for planning, and reserve `allowHeavyInspection=true` for explicit multi-page or document-wide analysis. Do not request path points, image metadata, text excerpts, hidden items, or deep detail by default. Expect bounded signals such as `typeScale`, `fontUsage`, `colorRoles`, `spacingScale`, `marginHints`, `gridHints`, `motifCandidates`, `imageRoles`, `warnings`, `confidence`, and `provenance`. Confirm important conclusions from real page items and previews.
 
 Preferred MCP tools:
 

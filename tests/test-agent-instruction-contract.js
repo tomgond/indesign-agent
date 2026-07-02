@@ -20,6 +20,15 @@ const files = {
     previewDoc: fs.readFileSync(new URL('../docs/template-generation/02-inspection-and-preview.md', import.meta.url), 'utf8')
 };
 
+const boundedDesignSystemChecks = [
+    [/analyze_design_system[\s\S]*bounded heuristic evidence/i, 'bounded design-system evidence'],
+    [/page-scoped by default[\s\S]*explicit `?pageIndex`?/i, 'page-scoped default'],
+    [/summary or standard detail/i, 'summary or standard detail'],
+    [/allowHeavyInspection=true/i, 'heavy-inspection opt-in'],
+    [/path points[\s\S]*image metadata[\s\S]*text excerpts[\s\S]*hidden items[\s\S]*deep detail/i, 'bounded default exclusions'],
+    [/typeScale[\s\S]*fontUsage[\s\S]*colorRoles[\s\S]*spacingScale[\s\S]*marginHints[\s\S]*gridHints[\s\S]*motifCandidates[\s\S]*imageRoles[\s\S]*warnings[\s\S]*confidence[\s\S]*provenance/i, 'bounded signal list']
+];
+
 const checksByFile = {
     codexTemplateAgent: [
         [/exported previews? .*document truth/i, 'exported preview truth'],
@@ -32,7 +41,8 @@ const checksByFile = {
         [/Never call `update_text_slot` with `fit:true`|Never call it with `fit:true`/i, 'update_text_slot fit:true rejection'],
         [/previewQuality:\s*"checkpoint"|`checkpoint`/i, 'checkpoint preview default'],
         [/source\/base-page checkpoint preview|visual anchor/i, 'source/base preview anchor'],
-        [/one or two targeted repairs|rollback|replan|rebuild/i, 'salvage/rebuild threshold']
+        [/one or two targeted repairs|rollback|replan|rebuild/i, 'salvage/rebuild threshold'],
+        ...boundedDesignSystemChecks
     ],
     codexOrchestrator: [
         [/exported previews? .*document truth/i, 'exported preview truth'],
@@ -41,7 +51,8 @@ const checksByFile = {
         [/diagnose_visual_mismatch/, 'diagnose_visual_mismatch'],
         [/Never call `update_text_slot` with `fit:true`/i, 'update_text_slot fit:true rejection'],
         [/previewQuality:\s*"checkpoint"|`checkpoint`/i, 'checkpoint preview default'],
-        [/one or two targeted repairs|rollback|replan|rebuild/i, 'salvage/rebuild threshold']
+        [/one or two targeted repairs|rollback|replan|rebuild/i, 'salvage/rebuild threshold'],
+        ...boundedDesignSystemChecks
     ],
     codexPlanner: [
         [/source\/base-page checkpoint preview|visual anchor/i, 'source/base preview anchor'],
@@ -49,7 +60,8 @@ const checksByFile = {
         [/rollback\/rebuild threshold|rollback|rebuild/i, 'salvage/rebuild threshold'],
         [/rubric findings as constraints/i, 'rubric findings as constraints'],
         [/not permission to redesign unrelated|do not invent style changes/i, 'no unrelated redesign'],
-        [/issue IDs or categories/i, 'rubric issue references']
+        [/issue IDs or categories/i, 'rubric issue references'],
+        ...boundedDesignSystemChecks
     ],
     codexExecutor: [
         [/diagnose_visual_mismatch/, 'diagnose_visual_mismatch'],
@@ -66,7 +78,8 @@ const checksByFile = {
         [/return_preview_as_image/, 'return_preview_as_image'],
         [/diagnose_visual_mismatch/, 'diagnose_visual_mismatch'],
         [/source\/base-page checkpoint preview|visual anchor/i, 'source/base preview anchor'],
-        [/without making creative judgments/i, 'evidence without creative judgment']
+        [/without making creative judgments/i, 'evidence without creative judgment'],
+        ...boundedDesignSystemChecks
     ],
     codexCritic: [
         [/record_visual_review[\s\S]*designQualityRubric|designQualityRubric[\s\S]*record_visual_review/i, 'structured review recording'],
@@ -92,7 +105,8 @@ const checksByFile = {
         [/Never call it with `fit:true`|Use `update_text_slot` only when text content actually changes/i, 'update_text_slot fit:true rejection'],
         [/previewQuality:\s*"checkpoint"|`checkpoint`/i, 'checkpoint preview default'],
         [/source\/base-page checkpoint preview|visual anchor/i, 'source/base preview anchor'],
-        [/one or two targeted repairs|rollback|replan|rebuild/i, 'salvage/rebuild threshold']
+        [/one or two targeted repairs|rollback|replan|rebuild/i, 'salvage/rebuild threshold'],
+        ...boundedDesignSystemChecks
     ],
     opencodeOrchestrator: [
         [/document\/export\/layout truth/i, 'exported preview truth'],
@@ -100,7 +114,8 @@ const checksByFile = {
         [/viewport\/focus\/UI diagnosis/i, 'screenshot diagnosis only'],
         [/source\/base-page checkpoint preview|visual anchor/i, 'source/base preview anchor'],
         [/layer strategy/i, 'layer strategy'],
-        [/rollback|replan/i, 'salvage/rebuild threshold']
+        [/rollback|replan/i, 'salvage/rebuild threshold'],
+        ...boundedDesignSystemChecks
     ],
     opencodePlanner: [
         [/source\/base-page checkpoint preview|visual anchor|sourcePreviewAnchor/i, 'source/base preview anchor'],
@@ -108,7 +123,8 @@ const checksByFile = {
         [/autoFit: false|Do not use text mutation or `autoFit`/i, 'autoFit discouraged'],
         [/rubric findings as constraints/i, 'rubric findings as constraints'],
         [/not permission to redesign unrelated|must not invent style changes/i, 'no unrelated redesign'],
-        [/issue IDs or categories/i, 'rubric issue references']
+        [/issue IDs or categories/i, 'rubric issue references'],
+        ...boundedDesignSystemChecks
     ],
     opencodeExecutor: [
         [/diagnose_visual_mismatch/, 'diagnose_visual_mismatch'],
@@ -121,7 +137,8 @@ const checksByFile = {
         [/export_page_preview/, 'export_page_preview'],
         [/return_preview_as_image/, 'return_preview_as_image'],
         [/source\/base page|source\/base-page checkpoint preview|visual anchor/i, 'source/base preview anchor'],
-        [/without making creative judgments/i, 'evidence without creative judgment']
+        [/without making creative judgments/i, 'evidence without creative judgment'],
+        ...boundedDesignSystemChecks
     ],
     opencodeCritic: [
         [/record_visual_review[\s\S]*designQualityRubric|designQualityRubric[\s\S]*record_visual_review/i, 'structured review recording'],
@@ -135,6 +152,10 @@ const checksByFile = {
         [/high-severity design issues block finalization only when[\s\S]*userAcceptanceCriteria[\s\S]*readability[\s\S]*editability[\s\S]*productionSafety/i, 'narrow design blocker rule'],
         [/visualQualityOnly[\s\S]*do not block/i, 'visual quality warning rule'],
         [/partial rubric as incomplete evidence[\s\S]*do not finalize/i, 'partial rubric preflight rule']
+    ],
+    llmPrompt: [
+        [/Exported preview = document\/export\/layout truth/i, 'exported preview truth'],
+        ...boundedDesignSystemChecks
     ]
 };
 
@@ -146,6 +167,7 @@ for (const [name, checks] of Object.entries(checksByFile)) {
 
 assert.doesNotMatch(files.llmPrompt, /A screenshot is the visual truth/i);
 assert.match(files.llmPrompt, /Exported preview = document\/export\/layout truth/i);
+assert.match(files.llmPrompt, /Confirm important conclusions from real page items and previews/i);
 assert.match(files.previewDoc, /Return preview metadata by default/i);
 assert.match(files.previewDoc, /Attach an MCP image only when `returnImage: true`/i);
 assert.doesNotMatch(files.previewDoc, /returns an MCP image response by default/i);
