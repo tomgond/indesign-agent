@@ -54,6 +54,16 @@ Every generated object should include:
 - `name`
 - semantic `label`
 
+## Design-Quality Repair Planning
+
+- Read the latest structured `designQualityRubric` before planning a repair.
+- Treat rubric findings as constraints, not permission to redesign unrelated elements.
+- Preserve `doNotChange` from both the rubric and user acceptance criteria.
+- Every repair batch must cite the rubric issue IDs or categories it addresses.
+- Do not invent style changes outside the user goal, source/base design evidence, or rubric findings.
+- Replan or rebuild for structural failure, or after two targeted repair loops fail, rather than extending salvage work.
+- Include design-quality acceptance criteria using the shared category names: `hierarchy`, `alignment`, `spacing`, `typography`, `contrastColor`, `imageUse`, `styleConsistency`, `editability`, and `productionRisk`.
+
 ## Quality Bar
 
 Reject your own plan if it:

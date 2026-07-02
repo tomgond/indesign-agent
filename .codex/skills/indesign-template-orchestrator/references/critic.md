@@ -1,61 +1,90 @@
 # Critic
 
-Use this reference for preview-driven derivative review.
+Use this reference for preview-driven derivative review. Judge from exported preview evidence plus structured inspection without mutating the document.
 
-## Mission
+## Truth And Context
 
-Judge the derivative from preview evidence plus structured inspection data, then produce concrete repair instructions without mutating the document.
+Validate `derivativeId`, preview ID, objective, and acceptance criteria. Inspect the derivative when inspection evidence is missing. If no preview exists, return `re_export_preview`.
 
-## Inputs To Validate
+- Exported preview is document/export/layout truth.
+- Structured inspection is object/layer/text/geometry truth.
+- Screenshots are only viewport/focus/UI diagnosis.
+- If preview and inspection disagree, set `productionRisk` to warning or fail and recommend `diagnose_visual_mismatch` before content edits.
 
-- `derivativeId`
-- latest preview
-- latest inspection or ability to inspect
-- objective
-- acceptance criteria
+## Structured Design-Quality Rubric
 
-If no preview exists, return `re_export_preview`.
+Every substantive preview review must produce this `designQualityRubric` and pass it to `record_visual_review`:
 
-## Review Categories
+```yaml
+schemaVersion: "1.0"
+overallStatus: pass | needs_repair | blocked
+confidence: low | medium | high
+summary: string
+sourceEvidence:
+  derivativeId: string
+  previewId: string or null
+  indesignPreviewId: string or null
+  targetPreviewId: string or null
+  inspectionId: string or null
+  pageIndex: integer or null
+  toolEvidence: [inspect_derivative, compare_derivative_state, run_derivative_checks]
+  sourceBasePreviewId: string or null
+categories:
+  hierarchy: categoryResult
+  alignment: categoryResult
+  spacing: categoryResult
+  typography: categoryResult
+  contrastColor: categoryResult
+  imageUse: categoryResult
+  styleConsistency: categoryResult
+  editability: categoryResult
+  productionRisk: categoryResult
+highSeverityIssues: []
+blockers: []
+warnings: []
+recommendedNextBatch: object or null
+doNotChange: []
+```
 
-- hierarchy
-- alignment
-- spacing
-- legibility
-- image use
-- style consistency
-- editability
-- production risks
+Each category result must contain:
 
-## Repair Rules
+```yaml
+rating: pass | warning | fail
+severity: none | low | medium | high
+score: 0 | 1 | 2 | 3
+evidence: concise preview or inspection observation
+affectedObjects: []
+repairSuggestion: string
+suggestedToolCalls: []
+acceptanceImpact: none | readability | editability | productionSafety | userAcceptanceCriteria | visualQualityOnly
+blocksFinalization: boolean
+```
 
-- Prefer one `apply_layout_recipe` for related repairs.
-- Otherwise suggest exact tools such as `set_bounds`, `move_resize_items`, `align_items`, `update_text_slot`, `fit_text_to_frame`, `diagnose_visual_mismatch`, `set_item_layer`, `apply_styles`, `apply_swatches`, `hide_reference_underlay`, `remove_reference_underlay`, or `label_object`.
-- Do not suggest arbitrary code, rasterizing the final design, deleting large unknown object sets, replacing live text with images, or modifying the original file.
-- Prefer `previewQuality: "checkpoint"` for repair checkpoints unless the low-res preview is ambiguous.
-- If preview and inspection disagree, request `diagnose_visual_mismatch` before recommending text/content changes.
-- Treat text-content changes and fitting as separate operations. Do not recommend `update_text_slot` with `fit:true`.
-- If fitting has already failed with a runtime or syntax error in the session, do not recommend more fit/autoFit paths; recommend geometry or layer repair instead.
-- If the preview is blank, solid-color, or missing expected motifs while objects still exist, prioritize layer/visibility/occlusion diagnosis before content edits.
-- Do not recommend mutating known-good visible text just to repair geometry or fitting.
-- If one diagnosis plus one repair batch is unlikely to improve the page, recommend replan or rollback rather than compounding salvage edits.
+Use `3` for strong/pass, `2` for acceptable, `1` for warning, and `0` for fail. Every warning/fail needs evidence and a scoped repair suggestion. High-severity issues must state whether the impact is readability, editability, production safety, or stated user acceptance criteria. A `visualQualityOnly` finding is a warning and does not block finalization unless it clearly violates the user request or makes the design unreadable or unusable.
 
-## Verdict Policy
+`recommendedNextBatch` is nullable. When present, it must identify issue IDs or categories and contain at most one bounded repair batch, never a free-form redesign. Preserve acceptance criteria and `doNotChange`.
 
-- `accept`: visually acceptable and no high-severity production issue is visible.
-- `repair`: concrete fixable issues remain.
-- `replan`: composition is structurally wrong or repairs are too complex.
-- `rollback`: recent repairs made the state worse or inconsistent.
-- `preflight`: visual state is acceptable and only production checks remain.
-- `re_export_preview`: no preview evidence exists yet.
+## Review Flow
 
-## Output Requirements
+1. Validate context and gather missing structured inspection.
+2. Load the exported preview; compare prior state when useful.
+3. Build all nine category results from preview plus inspection evidence.
+4. Produce at most one bounded repair batch.
+5. Call `record_visual_review` with `derivativeId`, preview IDs, legacy fields when useful, and the full `designQualityRubric`.
+6. Return the rubric, recording result, and verdict.
 
-Return:
+## Repair Constraints
 
-- verdict, confidence, derivative ID, preview ID, inspection ID, and reason
-- category-level assessment
-- concrete issues with evidence, targets, suggested tools, and expected effect
-- one repair batch when appropriate
-- acceptance readiness and remaining risks
-- whether a visual review record was written
+- Do not suggest arbitrary code, rasterizing the final design, deleting large unknown object sets, replacing live text with an image, using a reference underlay as final artwork, or modifying the original file.
+- Do not recommend `update_text_slot` with `fit:true`; change text, inspect/export, then fit separately if needed.
+- Prefer labels over raw object IDs when available.
+- For blank, solid-color, or incomplete previews with structured objects present, recommend `diagnose_visual_mismatch`, `set_item_layer`, `send_to_back`, or `bring_to_front` before content edits.
+- Do not mutate known-good text for geometry repair.
+- If one diagnosis and one repair batch are unlikely to help, or two targeted repair loops failed, recommend replan, rollback, or rebuild.
+
+## Verdict Mapping
+
+- `pass` normally maps to `preflight` or `accept`.
+- `needs_repair` maps to `repair` only when the repair is bounded.
+- `blocked` maps to `replan`, `rollback`, or `re_export_preview` according to the evidence.
+- `accept` or `preflight` requires no high-severity blocker affecting readability, editability, production safety, or user acceptance criteria.

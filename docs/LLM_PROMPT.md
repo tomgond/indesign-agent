@@ -130,6 +130,10 @@ For derivative generation and layout validation, **use exported previews plus st
 - In headless or remote environments without a display, screenshot tools will return a clear error.
 - When a template workspace is active, exported previews belong under `workspaceRoot/previews/`.
 
+### Structured Design-Quality Review
+
+Substantive visual review must record a structured rubric through `record_visual_review`. Review `hierarchy`, `alignment`, `spacing`, `typography`, `contrastColor`, `imageUse`, `styleConsistency`, `editability`, and `productionRisk`; each category records `rating`, `severity`, `score`, evidence, scoped repair guidance, acceptance impact, and whether it blocks finalization. Repairs must be concrete and bounded. Preflight blocks high-severity rubric issues only when they affect stated acceptance criteria, readability, editability, or production safety; subjective visual-quality warnings are not a general taste gate. Critique still uses exported previews plus structured inspection, never screenshots as layout truth.
+
 ### Image Placement with Scaling
 
 ```javascript

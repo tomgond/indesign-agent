@@ -814,9 +814,61 @@ export class TemplateHandlers {
     static record_visual_review(args = {}) {
         return response((async () => {
             const m = loadWorkspace();
-            const review = { reviewId: `review_${Date.now()}`, derivativeId: args.derivativeId, targetPreviewId: args.targetPreviewId || null, indesignPreviewId: args.indesignPreviewId || null, brief: args.brief || '', issues: args.issues || [], suggestedFixes: args.suggestedFixes || [], timestamp: new Date().toISOString() };
+            const suppliedRubric = args.designQualityRubric;
+            const hasStructuredReview = suppliedRubric != null || [
+                'overallStatus', 'confidence', 'sourceEvidence', 'categoryRatings', 'highSeverityIssues', 'blockers',
+                'warnings', 'recommendedNextBatch', 'doNotChange'
+            ].some((key) => Object.hasOwn(args, key));
+            const rubric = suppliedRubric || (hasStructuredReview ? {
+                schemaVersion: '1.0',
+                overallStatus: args.overallStatus,
+                confidence: args.confidence,
+                sourceEvidence: args.sourceEvidence,
+                categories: args.categoryRatings,
+                highSeverityIssues: args.highSeverityIssues,
+                blockers: args.blockers,
+                warnings: args.warnings,
+                recommendedNextBatch: args.recommendedNextBatch,
+                doNotChange: args.doNotChange
+            } : null);
+            const review = {
+                reviewId: `review_${Date.now()}`,
+                derivativeId: args.derivativeId,
+                targetPreviewId: args.targetPreviewId || null,
+                indesignPreviewId: args.indesignPreviewId || null,
+                brief: args.brief || '',
+                issues: args.issues || [],
+                suggestedFixes: args.suggestedFixes || [],
+                ...(rubric ? {
+                    designQualityRubric: rubric,
+                    overallStatus: rubric.overallStatus ?? args.overallStatus ?? null,
+                    confidence: rubric.confidence ?? args.confidence ?? null,
+                    sourceEvidence: rubric.sourceEvidence ?? args.sourceEvidence ?? null,
+                    categoryRatings: rubric.categories ?? args.categoryRatings ?? null,
+                    highSeverityIssues: rubric.highSeverityIssues ?? args.highSeverityIssues ?? [],
+                    blockers: rubric.blockers ?? args.blockers ?? [],
+                    warnings: rubric.warnings ?? args.warnings ?? [],
+                    recommendedNextBatch: rubric.recommendedNextBatch ?? args.recommendedNextBatch ?? null,
+                    doNotChange: rubric.doNotChange ?? args.doNotChange ?? []
+                } : {}),
+                timestamp: new Date().toISOString()
+            };
+            const unresolved = (items) => (Array.isArray(items) ? items : []).filter((item) => item?.resolved !== true && item?.status !== 'resolved');
+            const unresolvedHighSeverityIssues = rubric ? unresolved(rubric.highSeverityIssues) : [];
+            const unresolvedBlockers = rubric ? unresolved(rubric.blockers ?? args.blockers) : [];
+            const outstandingIssueCount = rubric
+                ? unresolvedHighSeverityIssues.length + unresolvedBlockers.length
+                : review.issues.length;
             fs.appendFileSync(assertWorkspacePath(path.join(m.workspaceRoot, 'logs', 'visual_reviews.jsonl'), { kind: 'logs', manifest: m }).path, `${JSON.stringify(review)}\n`);
-            upsertDerivative(m, args.derivativeId, { latestReviewId: review.reviewId, outstandingIssueCount: review.issues.length });
+            upsertDerivative(m, args.derivativeId, {
+                latestReviewId: review.reviewId,
+                outstandingIssueCount,
+                ...(rubric ? {
+                    latestDesignReviewStatus: review.overallStatus,
+                    latestDesignReviewConfidence: review.confidence,
+                    unresolvedDesignBlockerCount: unresolvedBlockers.length
+                } : {})
+            });
             return review;
         })(), 'record_visual_review');
     }

@@ -35,6 +35,8 @@ The deliverable is editable InDesign structure, not flattened artwork. Preview i
 - If text fitting is needed, inspect/export first, then call `fit_text_to_frame` separately and check `resolved` and `stillOverset` on the result.
 - Decorative bleed is opt-in. Keep normal content slots strict unless a call explicitly sets `allowBleed` or `decorative`.
 - Once one or two targeted repairs fail to improve the preview, or known-good text/motif preservation becomes uncertain, stop salvage work and rebuild from the source anchor instead.
+- Use the structured `designQualityRubric` as the normal visual-review contract. Its categories are `hierarchy`, `alignment`, `spacing`, `typography`, `contrastColor`, `imageUse`, `styleConsistency`, `editability`, and `productionRisk`; record substantive reviews with `record_visual_review`.
+- Treat rubric repairs as bounded constraints, preserve `doNotChange`, and do not redesign unrelated elements.
 
 ## Geometry And Coordinates
 

@@ -31,6 +31,7 @@ Decide whether a derivative is safe to save, finalize, and mark accepted as a re
 6. Only if all release criteria pass, run `finalize_derivative` and save a version.
 7. If finalization succeeds and the resulting evidence is complete, mark the derivative accepted.
 8. If fitting failed with tool instability, preview and inspection still disagree, or known-good text became damaged, return the derivative for rollback or rebuild instead of finalization.
+9. Read the latest visual review with `list_visual_reviews` when available and evaluate unresolved structured rubric findings.
 
 ## Blocking Criteria
 
@@ -52,6 +53,8 @@ Treat these as blockers:
 - missing user-required asset
 
 Missing links can be warnings only when intentional placeholder image slots are acceptable for the task.
+
+Unresolved high-severity design issues block finalization only when `acceptanceImpact` is `userAcceptanceCriteria`, `readability`, `editability`, or `productionSafety`. A `visualQualityOnly` warning does not block unless the user explicitly made that concern an acceptance criterion. The rubric is not a broad taste gate.
 
 Once text or content is correct and visible, final-state protection applies: no destructive text updates, no risky fit paths, and no text-layer moves without a concrete mismatch diagnosis.
 

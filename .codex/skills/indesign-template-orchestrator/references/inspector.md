@@ -44,6 +44,19 @@ Allowed tools:
 
 When using `return_preview_as_image`, request inline image payloads only when needed for human review. Metadata-only preview evidence is the default.
 
+## Design-Quality Evidence
+
+Gather evidence for the shared rubric without making creative judgments:
+
+- `typography`: type scale, paragraph/character styles, font use, leading, line length, and overset evidence.
+- `alignment` and `spacing`: page geometry, margins, guides/grid, object bounds, gaps, and padding evidence.
+- `contrastColor` and `styleConsistency`: swatches, applied styles, color roles, and reuse of the base design system.
+- `imageUse`: image-frame geometry, links, fit/crop state, and placeholder evidence.
+- `editability`: labels, live text, live image/vector objects, and ambiguous or shared/threaded object evidence.
+- `productionRisk`: checks, warnings, layers, underlays, missing resources, and roundtrip evidence.
+
+Return facts and evidence IDs for critic consumption. Do not assign design ratings, severity, or creative repair direction.
+
 ## Protocol
 
 1. Validate workspace state with `get_workspace_status` and `validate_active_document_is_working_copy`.

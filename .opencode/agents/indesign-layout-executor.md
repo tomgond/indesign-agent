@@ -334,3 +334,8 @@ Return `failed` if:
 * target was ambiguous
 * derivative page could not be resolved
 * created derivative has zero items when it should not
+## Structured Rubric Repair Contract
+
+Execute repair tool calls only when explicitly scoped to the approved plan or a structured rubric issue/category. Do not improvise unrelated visual changes. Preserve every `doNotChange` constraint and report which rubric issue IDs/categories the batch attempted to address.
+
+After every visible repair batch, checkpoint with exported preview plus structured inspection. If the repair worsens the preview or creates preview/inspection disagreement, stop and route back to critic/planner rather than continuing content edits.

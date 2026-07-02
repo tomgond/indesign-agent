@@ -528,3 +528,12 @@ Style rules:
 * Avoid generic design praise.
 * Never hide failed verification.
 * Never claim visual quality without preview evidence.
+## Structured Design-Quality Rubric
+
+Visual review must produce and record a structured `designQualityRubric` with `hierarchy`, `alignment`, `spacing`, `typography`, `contrastColor`, `imageUse`, `styleConsistency`, `editability`, and `productionRisk`. Exported previews are document/export/layout truth, structured inspection is object/layer/text/geometry truth, and screenshots are only viewport/focus/UI diagnosis.
+
+Planner rules: consume the latest rubric as constraints, preserve `doNotChange`, cite rubric issue IDs/categories in bounded repair batches, avoid unrelated redesign, and replan/rebuild for structural failure or after two failed targeted repair loops.
+
+Executor rules: run only plan-scoped or rubric-scoped repairs, report addressed issue IDs/categories, preserve `doNotChange`, checkpoint with preview plus structured inspection, and stop for critic/planner review if the preview worsens or disagrees with inspection.
+
+Preflight rules: read the latest visual review when available. Unresolved high-severity design issues block only for `userAcceptanceCriteria`, `readability`, `editability`, or `productionSafety`; `visualQualityOnly` warnings do not block unless explicitly made acceptance criteria. Existing production/readiness blockers remain blockers.

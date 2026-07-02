@@ -34,7 +34,7 @@ These pieces are complete enough for Node-side use and have local checks:
 - `fit_text_to_frame` nullish/boolean precedence fix plus local regression coverage.
 - `duplicate_template_page` schema/handler with direct full-page duplication, copied-slot relabeling, duplicate-slot rollback, in-script derivative marker creation, manifest metadata persistence, and default rejection of duplicate `derivativeId` values.
 - Dependency-free `scripts/fill_template_from_csv.py` with exact UTF-8/BOM CSV parsing, pre-mutation validation, explicit active-document `ok:true` checking, Streamable HTTP session reuse, durable slot targeting, hashes/result reporting, dry-run, and fake-client tests.
-- Visual-review JSONL append/list and derivative status updates in manifest.
+- Visual-review JSONL append/list, backward-compatible structured design-quality rubric persistence, and derivative review-status summaries in the manifest.
 - Fast Node tests for HTTP transport, workspace safety, bridge timeout dirty-state, UXP busy-gate, and inspection bounds.
 - Live MVP test scaffold that fails clearly without Mac/InDesign/bridge/plugin.
 

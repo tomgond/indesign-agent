@@ -44,6 +44,7 @@ Coordinate real editable InDesign document construction through the MCP server:
 17. Preserve known-good text before risky edits and do not use text mutation for geometry repair. Raw duplicated or threaded/shared text frames are not normal editable text.
 18. Decorative bleed is opt-in. Keep normal content slots strict unless a call explicitly sets `allowBleed` or `decorative`.
 19. If one or two targeted repairs fail to improve the page, rollback/replan instead of compounding salvage edits.
+20. Use the shared structured `designQualityRubric` for visual review: `hierarchy`, `alignment`, `spacing`, `typography`, `contrastColor`, `imageUse`, `styleConsistency`, `editability`, and `productionRisk`.
 
 ## Workflow
 
@@ -109,6 +110,8 @@ Reject plans that:
 - rely on raster artwork as the final editable output
 - create unlabeled generated objects
 
+For repair planning, consume the latest rubric as constraints, preserve `doNotChange`, cite issue IDs/categories in each batch, and do not introduce unrelated redesign. Replan/rebuild on structural failure or after two failed targeted repair loops.
+
 ### 4. Execute
 
 Load [references/executor.md](references/executor.md) and run one derivative or repair batch at a time.
@@ -124,6 +127,7 @@ Load [references/executor.md](references/executor.md) and run one derivative or 
   - source layers untouched with only safe editable overlays
 - Do not place full-page backgrounds above source text, source motifs, or duplicated content.
 - After visible mutation batches, require preview plus structured inspection agreement before continuing.
+- Execute only plan-scoped or rubric-scoped repair calls, report addressed issue IDs/categories, preserve `doNotChange`, and stop for critic/planner review if the preview worsens or disagrees with inspection.
 
 ### 5. Critique
 
@@ -134,6 +138,7 @@ Load [references/critic.md](references/critic.md) after preview export.
 - Do not claim visual quality without preview evidence.
 - If one diagnosis plus one repair batch does not resolve a preview/inspection mismatch, replan or rebuild instead of compounding salvage edits.
 - If known-good text became damaged or fitting failed with tool instability, prefer rollback/rebuild over more salvage edits.
+- Require all nine rubric categories and call `record_visual_review` with the structured rubric for substantive review.
 
 ### 6. Preflight And Finalize
 
@@ -148,6 +153,7 @@ Load [references/preflight.md](references/preflight.md) once the derivative is v
 - Finalize and save a version only when release criteria pass.
 - Treat multiple independent failures as a salvage threshold: unresolved preview mismatch, fitting runtime failure, damaged known-good copy, or two repair batches that worsen the page should trigger rollback/replan instead of more patching.
 - Once text or content is correct and visible, avoid destructive text updates, risky fit paths, or unnecessary text-layer moves.
+- Read the latest visual review when available. High-severity design issues block only for user acceptance criteria, readability, editability, or production safety; `visualQualityOnly` warnings do not block unless explicitly promoted into acceptance criteria.
 
 ## Role Boundaries
 

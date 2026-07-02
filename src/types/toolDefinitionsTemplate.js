@@ -79,6 +79,64 @@ const boundsValidationSchemaProps = {
 const labelObjectSchema = { type: 'object', additionalProperties: true };
 const labelQuerySchema = { type: 'object', additionalProperties: true, description: 'Label match query against stored MCP label JSON.' };
 
+const designQualitySourceEvidenceSchema = {
+    type: 'object',
+    additionalProperties: true,
+    properties: {
+        derivativeId: { type: 'string' },
+        previewId: { type: 'string' },
+        indesignPreviewId: { type: 'string' },
+        targetPreviewId: { type: 'string' },
+        inspectionId: { type: 'string' },
+        pageIndex: { type: 'integer', minimum: 0 },
+        toolEvidence: { type: 'array', items: { type: 'string' } },
+        sourceBasePreviewId: { type: 'string' }
+    }
+};
+
+const designQualityCategorySchema = {
+    type: 'object',
+    additionalProperties: true,
+    properties: {
+        rating: { type: 'string', enum: ['pass', 'warning', 'fail'] },
+        severity: { type: 'string', enum: ['none', 'low', 'medium', 'high'] },
+        score: { type: 'integer', minimum: 0, maximum: 3 },
+        evidence: { type: 'string' },
+        affectedObjects: { type: 'array', items: { type: 'object', additionalProperties: true } },
+        repairSuggestion: { type: 'string' },
+        suggestedToolCalls: { type: 'array', maxItems: 10, items: { type: 'object', additionalProperties: true } },
+        acceptanceImpact: { type: 'string', enum: ['none', 'readability', 'editability', 'productionSafety', 'userAcceptanceCriteria', 'visualQualityOnly'] },
+        blocksFinalization: { type: 'boolean' }
+    }
+};
+
+const designQualityCategoriesSchema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: Object.fromEntries([
+        'hierarchy', 'alignment', 'spacing', 'typography', 'contrastColor', 'imageUse',
+        'styleConsistency', 'editability', 'productionRisk'
+    ].map((name) => [name, designQualityCategorySchema]))
+};
+
+const designQualityRubricSchema = {
+    type: 'object',
+    additionalProperties: true,
+    properties: {
+        schemaVersion: { type: 'string' },
+        overallStatus: { type: 'string', enum: ['pass', 'needs_repair', 'blocked'] },
+        confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+        summary: { type: 'string' },
+        sourceEvidence: designQualitySourceEvidenceSchema,
+        categories: designQualityCategoriesSchema,
+        highSeverityIssues: { type: 'array', items: { type: 'object', additionalProperties: true } },
+        blockers: { type: 'array', items: { type: 'object', additionalProperties: true } },
+        warnings: { type: 'array', items: { type: 'object', additionalProperties: true } },
+        recommendedNextBatch: { anyOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }] },
+        doNotChange: { type: 'array', items: {} }
+    }
+};
+
 const objectTargetSchema = {
     objectId: { type: 'integer' },
     name: { type: 'string' },
@@ -647,7 +705,7 @@ const primitiveToolDefinitions = [
     { name: 'create_reference_underlay', description: 'Create a non-printing reference image underlay.', inputSchema: schema({ derivativeId: { type: 'string' }, pageIndex: { type: 'integer', minimum: 0 }, bounds: boundsSchema, imagePath: { type: 'string', description: 'Path under workspace assets/ or input/.' }, filePath: { type: 'string', description: 'Alias for imagePath under workspace assets/ or input/.' }, unit: unitSchema, coordinateSpace: coordinateSpaceSchema, name: { type: 'string' }, label: labelObjectSchema, layerName: { type: 'string', default: 'REFERENCE_UNDERLAY' }, lockLayer: { type: 'boolean', default: true }, ...boundsValidationSchemaProps }, ['bounds'], { anyOf: [{ required: ['derivativeId', 'bounds', 'imagePath'] }, { required: ['derivativeId', 'bounds', 'filePath'] }, { required: ['pageIndex', 'bounds', 'imagePath'] }, { required: ['pageIndex', 'bounds', 'filePath'] }] }) },
     { name: 'hide_reference_underlay', description: 'Hide the reference underlay layer.', inputSchema: schema({ layerName: { type: 'string', default: 'REFERENCE_UNDERLAY' } }) },
     { name: 'remove_reference_underlay', description: 'Remove reference underlay items or the whole layer.', inputSchema: schema({ layerName: { type: 'string', default: 'REFERENCE_UNDERLAY' }, removeLayer: { type: 'boolean', default: true } }) },
-    { name: 'record_visual_review', description: 'Record visual review notes for a derivative.', inputSchema: schema({ derivativeId: { type: 'string' }, targetPreviewId: { type: 'string' }, indesignPreviewId: { type: 'string' }, brief: { type: 'string', default: '' }, issues: { type: 'array', items: {} }, suggestedFixes: { type: 'array', items: {} } }, ['derivativeId']) },
+    { name: 'record_visual_review', description: 'Record legacy review notes and an optional structured design-quality rubric for a derivative.', inputSchema: schema({ derivativeId: { type: 'string' }, targetPreviewId: { type: 'string' }, indesignPreviewId: { type: 'string' }, brief: { type: 'string', default: '' }, issues: { type: 'array', items: {} }, suggestedFixes: { type: 'array', items: {} }, designQualityRubric: designQualityRubricSchema, overallStatus: { type: 'string', enum: ['pass', 'needs_repair', 'blocked'] }, confidence: { type: 'string', enum: ['low', 'medium', 'high'] }, sourceEvidence: designQualitySourceEvidenceSchema, categoryRatings: designQualityCategoriesSchema, highSeverityIssues: { type: 'array', items: {} }, blockers: { type: 'array', items: {} }, warnings: { type: 'array', items: {} }, recommendedNextBatch: { anyOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }] }, doNotChange: { type: 'array', items: {} } }, ['derivativeId']) },
     { name: 'list_visual_reviews', description: 'List recorded visual reviews.', inputSchema: schema({ derivativeId: { type: 'string' }, limit: { type: 'integer', minimum: 1, default: 100 } }) },
     { name: 'mark_derivative_accepted', description: 'Mark a derivative preview/version as accepted.', inputSchema: schema({ derivativeId: { type: 'string' }, acceptedPreviewId: { type: 'string' }, versionId: { type: 'string' }, notes: { type: 'string', default: '' } }, ['derivativeId']) },
     { name: 'get_derivative_status', description: 'Get derivative manifest status.', inputSchema: schema({ derivativeId: { type: 'string' } }, ['derivativeId']) },

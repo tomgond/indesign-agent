@@ -38,6 +38,15 @@ Execute an approved batch against the workspace working copy and report exact ev
 6. If one or two targeted repairs do not improve the preview, or known-good text becomes uncertain, recommend rollback or replan instead of more salvage.
 7. Return tool-by-tool results, created and modified objects, checkpoint artifacts, errors, and the recommended next step.
 
+## Rubric-Scoped Repairs
+
+- Execute repair tool calls only when explicitly scoped by the approved plan or a structured rubric issue/category.
+- Do not improvise unrelated visual changes.
+- Preserve every `doNotChange` constraint.
+- Report the rubric issue IDs/categories each repair attempted to address.
+- After every visible repair batch, checkpoint with exported preview plus structured inspection.
+- If the preview worsens or preview and inspection disagree, stop and route back to critic/planner; do not continue content mutation.
+
 ## Failure Handling
 
 - Validation failure: stop.

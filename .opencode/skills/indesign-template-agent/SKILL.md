@@ -184,3 +184,8 @@ Recommended label pattern:
   "editable": true
 }
 ```
+## Structured Visual Review
+
+Use the structured `designQualityRubric` as the normal visual-review contract and record substantive reviews with `record_visual_review`. The shared categories are `hierarchy`, `alignment`, `spacing`, `typography`, `contrastColor`, `imageUse`, `styleConsistency`, `editability`, and `productionRisk`.
+
+Treat rubric repairs as bounded constraints, preserve `doNotChange`, and do not redesign unrelated elements. Exported previews remain document/export/layout truth, structured inspection remains object/layer/text/geometry truth, and live screen capture is only for viewport/focus/UI diagnosis.

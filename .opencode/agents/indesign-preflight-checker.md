@@ -54,6 +54,7 @@ Preferred tools:
 * `save_version`
 * `list_versions`
 * `mark_derivative_accepted`
+* `list_visual_reviews`
 
 Do not call layout mutation tools except finalization/versioning tools.
 
@@ -90,6 +91,8 @@ Fail if:
 * derivative has zero items
 * no preview exists
 * no inspection can be produced
+
+Read the latest visual review when available and evaluate unresolved structured rubric findings.
 
 Step 3: run derivative checks
 
@@ -178,6 +181,8 @@ These are usually warnings:
 * unused swatches/styles
 * old preview history exists
 * low-severity visual critique remains but user accepted it
+
+Unresolved high-severity design issues block finalization only when `acceptanceImpact` is `userAcceptanceCriteria`, `readability`, `editability`, or `productionSafety`. Purely subjective `visualQualityOnly` warnings do not block unless the user explicitly made them acceptance criteria. Do not use the rubric as a broad taste gate. Existing production/readiness blockers above remain blockers.
 
 Once text or content is correct and visible, final-state protection applies: no destructive text updates, no risky fit paths, and no text-layer moves without a concrete mismatch diagnosis.
 

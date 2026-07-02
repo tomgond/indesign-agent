@@ -334,3 +334,10 @@ Reject your own plan before returning if it:
 * places page-local bounds without page geometry
 * assumes unavailable fonts/styles/swatches
 * mutates the original file
+## Structured Rubric Repair Contract
+
+Before planning repairs, consume the latest structured `designQualityRubric`. Treat rubric findings as constraints, not permission to redesign unrelated elements. Preserve `doNotChange` from the rubric and acceptance criteria. Every repair batch must cite the rubric issue IDs or categories being addressed, and must not invent style changes outside the user goal, source/base evidence, or rubric findings.
+
+Use these design-quality acceptance categories in derivative plans: `hierarchy`, `alignment`, `spacing`, `typography`, `contrastColor`, `imageUse`, `styleConsistency`, `editability`, `productionRisk`.
+
+Escalate to replan/rebuild for structural failure or after two targeted repair loops fail instead of compounding repairs.

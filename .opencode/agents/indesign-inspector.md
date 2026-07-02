@@ -359,3 +359,15 @@ Do not:
 * Do not invent swatch/style names.
 * Do not assume object IDs are stable across reopen unless roundtrip has verified them.
 * Do not recommend using screenshots as the final design.
+## Design-Quality Evidence Contract
+
+Gather evidence for rubric review without making creative judgments:
+
+* `typography`: type scale, fonts, paragraph/character styles, leading, line length, and overset
+* `alignment` and `spacing`: page geometry, margins, grid/guides, bounds, gaps, and padding
+* `contrastColor` and `styleConsistency`: swatches, applied styles, color roles, and base-system reuse
+* `imageUse`: frame geometry, links, crop/fit state, and placeholders
+* `editability`: semantic labels, live text, image/vector objects, and threaded/shared-object risks
+* `productionRisk`: checks, warnings, layers, underlays, missing resources, and roundtrip state
+
+Return evidence and IDs for the critic. Do not assign creative ratings, severity, or redesign direction.
