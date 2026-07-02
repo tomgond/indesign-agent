@@ -56,6 +56,8 @@ Missing links can be warnings only when intentional placeholder image slots are 
 
 Unresolved high-severity design issues block finalization only when `acceptanceImpact` is `userAcceptanceCriteria`, `readability`, `editability`, or `productionSafety`. A `visualQualityOnly` warning does not block unless the user explicitly made that concern an acceptance criterion. The rubric is not a broad taste gate.
 
+Use the normalized review blocker summary and category-level `blocksFinalization` evidence, not only raw top-level arrays. Treat a partial rubric as incomplete evidence, not a pass; do not finalize when missing categories leave acceptance criteria, readability, editability, or production safety unverified.
+
 Once text or content is correct and visible, final-state protection applies: no destructive text updates, no risky fit paths, and no text-layer moves without a concrete mismatch diagnosis.
 
 ## Output Requirements

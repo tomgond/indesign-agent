@@ -13,7 +13,7 @@ Validate `derivativeId`, preview ID, objective, and acceptance criteria. Inspect
 
 ## Structured Design-Quality Rubric
 
-Every substantive preview review must produce this `designQualityRubric` and pass it to `record_visual_review`:
+Every substantive preview review with sufficient evidence must produce all nine categories in this `designQualityRubric` and pass it to `record_visual_review`:
 
 ```yaml
 schemaVersion: "1.0"
@@ -63,6 +63,8 @@ blocksFinalization: boolean
 Use `3` for strong/pass, `2` for acceptable, `1` for warning, and `0` for fail. Every warning/fail needs evidence and a scoped repair suggestion. High-severity issues must state whether the impact is readability, editability, production safety, or stated user acceptance criteria. A `visualQualityOnly` finding is a warning and does not block finalization unless it clearly violates the user request or makes the design unreadable or unusable.
 
 `recommendedNextBatch` is nullable. When present, it must identify issue IDs or categories and contain at most one bounded repair batch, never a free-form redesign. Preserve acceptance criteria and `doNotChange`.
+
+If failed preview export, missing inspection, degraded state, or interruption prevents a complete review, still call `record_visual_review` with the partial evidence available. A partial rubric is incomplete evidence, never an implied pass; identify the missing evidence and route to re-export, inspection, repair, or replan.
 
 ## Review Flow
 

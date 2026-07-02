@@ -10,8 +10,125 @@ import { imageInfo } from '../utils/imageInfo.js';
 import { buildMcpImagePayload } from '../utils/mcpImage.js';
 import { appendRuntimeLog, readRuntimeLogs, resolveRuntimeLogPath } from '../core/runtimeLogger.js';
 import os from 'node:os';
+import { isDeepStrictEqual } from 'node:util';
 
 const LABEL_KEY = 'mcpTemplateLabel';
+const DESIGN_QUALITY_CATEGORIES = Object.freeze([
+    'hierarchy', 'alignment', 'spacing', 'typography', 'contrastColor', 'imageUse',
+    'styleConsistency', 'editability', 'productionRisk'
+]);
+const BLOCKING_ACCEPTANCE_IMPACTS = new Set([
+    'userAcceptanceCriteria', 'readability', 'editability', 'productionSafety'
+]);
+
+function isRecord(value) {
+    return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function unresolvedReviewItems(value) {
+    return (Array.isArray(value) ? value : []).filter((item) => item?.resolved !== true && item?.status !== 'resolved');
+}
+
+function normalizeDesignQualityReview(args) {
+    const structuredKeys = [
+        'overallStatus', 'confidence', 'sourceEvidence', 'categoryRatings', 'highSeverityIssues',
+        'blockers', 'warnings', 'recommendedNextBatch', 'doNotChange'
+    ];
+    const suppliedRubric = isRecord(args.designQualityRubric) ? args.designQualityRubric : null;
+    const hasStructuredReview = suppliedRubric != null || structuredKeys.some((key) => Object.hasOwn(args, key));
+    if (!hasStructuredReview) {
+        return {
+            rubric: null,
+            rubricCompleteness: 'none',
+            presentCategories: [],
+            missingCategories: [],
+            schemaWarnings: [],
+            blockerCount: 0
+        };
+    }
+
+    const schemaWarnings = Array.isArray(suppliedRubric?.schemaWarnings) ? [...suppliedRubric.schemaWarnings] : [];
+    if (Object.hasOwn(args, 'designQualityRubric') && args.designQualityRubric != null && !suppliedRubric) {
+        schemaWarnings.push('designQualityRubric was not an object; preserved structured aliases only.');
+    }
+
+    const nestedCategories = suppliedRubric?.categories;
+    const aliasCategories = args.categoryRatings;
+    let categories = {};
+    if (isRecord(nestedCategories)) {
+        categories = nestedCategories;
+        if (isRecord(aliasCategories) && !isDeepStrictEqual(nestedCategories, aliasCategories)) {
+            schemaWarnings.push('designQualityRubric.categories differed from categoryRatings; nested categories were used.');
+        }
+    } else if (isRecord(aliasCategories)) {
+        categories = aliasCategories;
+        if (nestedCategories != null) schemaWarnings.push('designQualityRubric.categories was not an object; categoryRatings was used.');
+    } else if (nestedCategories != null || aliasCategories != null) {
+        schemaWarnings.push('No usable category object was supplied.');
+    }
+
+    const unknownCategories = Object.keys(categories).filter((name) => !DESIGN_QUALITY_CATEGORIES.includes(name));
+    if (unknownCategories.length) schemaWarnings.push(`Unknown rubric categories were preserved: ${unknownCategories.join(', ')}.`);
+    const presentCategories = DESIGN_QUALITY_CATEGORIES.filter((name) => isRecord(categories[name]));
+    const invalidCategories = DESIGN_QUALITY_CATEGORIES.filter((name) => Object.hasOwn(categories, name) && !isRecord(categories[name]));
+    if (invalidCategories.length) schemaWarnings.push(`Non-object rubric categories were treated as missing: ${invalidCategories.join(', ')}.`);
+    const missingCategories = DESIGN_QUALITY_CATEGORIES.filter((name) => !presentCategories.includes(name));
+    const rubricCompleteness = missingCategories.length ? 'partial' : 'complete';
+
+    const readRubricField = (key, fallback) => {
+        if (suppliedRubric && Object.hasOwn(suppliedRubric, key)) return suppliedRubric[key];
+        if (Object.hasOwn(args, key)) return args[key];
+        return fallback;
+    };
+    const highSeverityIssues = readRubricField('highSeverityIssues', []);
+    const blockers = readRubricField('blockers', []);
+    const rubric = {
+        ...(suppliedRubric || {}),
+        ...(suppliedRubric?.schemaVersion == null ? { schemaVersion: '1.0' } : {}),
+        categories,
+        highSeverityIssues: Array.isArray(highSeverityIssues) ? highSeverityIssues : [],
+        blockers: Array.isArray(blockers) ? blockers : [],
+        warnings: Array.isArray(readRubricField('warnings', [])) ? readRubricField('warnings', []) : [],
+        recommendedNextBatch: readRubricField('recommendedNextBatch', null),
+        doNotChange: Array.isArray(readRubricField('doNotChange', [])) ? readRubricField('doNotChange', []) : [],
+        rubricCompleteness,
+        presentCategories,
+        missingCategories,
+        schemaWarnings
+    };
+    for (const key of ['overallStatus', 'confidence', 'sourceEvidence']) {
+        const value = readRubricField(key, undefined);
+        if (value !== undefined) rubric[key] = value;
+    }
+
+    const blockerKeys = new Set();
+    const topLevelBlockerCategories = new Set();
+    const addTopLevelBlocker = (item, prefix, index) => {
+        const category = typeof item?.category === 'string' ? item.category : null;
+        if (category) topLevelBlockerCategories.add(category);
+        blockerKeys.add(item?.id != null ? `id:${item.id}` : category ? `category:${category}` : `${prefix}:${index}`);
+    };
+    unresolvedReviewItems(rubric.blockers).forEach((item, index) => addTopLevelBlocker(item, 'blocker', index));
+    unresolvedReviewItems(rubric.highSeverityIssues)
+        .filter((item) => BLOCKING_ACCEPTANCE_IMPACTS.has(item?.acceptanceImpact) && item?.blocksFinalization !== false)
+        .forEach((item, index) => addTopLevelBlocker(item, 'highSeverityIssue', index));
+    for (const category of presentCategories) {
+        const result = categories[category];
+        const categoryBlocks = result.blocksFinalization === true
+            && BLOCKING_ACCEPTANCE_IMPACTS.has(result.acceptanceImpact)
+            && (result.severity === 'high' || result.rating === 'fail');
+        if (categoryBlocks && !topLevelBlockerCategories.has(category)) blockerKeys.add(`category:${category}`);
+    }
+
+    return {
+        rubric,
+        rubricCompleteness,
+        presentCategories,
+        missingCategories,
+        schemaWarnings,
+        blockerCount: blockerKeys.size
+    };
+}
 
 // Trace and timing helpers — used by composed template tools
 function generateTraceId() {
@@ -814,23 +931,8 @@ export class TemplateHandlers {
     static record_visual_review(args = {}) {
         return response((async () => {
             const m = loadWorkspace();
-            const suppliedRubric = args.designQualityRubric;
-            const hasStructuredReview = suppliedRubric != null || [
-                'overallStatus', 'confidence', 'sourceEvidence', 'categoryRatings', 'highSeverityIssues', 'blockers',
-                'warnings', 'recommendedNextBatch', 'doNotChange'
-            ].some((key) => Object.hasOwn(args, key));
-            const rubric = suppliedRubric || (hasStructuredReview ? {
-                schemaVersion: '1.0',
-                overallStatus: args.overallStatus,
-                confidence: args.confidence,
-                sourceEvidence: args.sourceEvidence,
-                categories: args.categoryRatings,
-                highSeverityIssues: args.highSeverityIssues,
-                blockers: args.blockers,
-                warnings: args.warnings,
-                recommendedNextBatch: args.recommendedNextBatch,
-                doNotChange: args.doNotChange
-            } : null);
+            const normalized = normalizeDesignQualityReview(args);
+            const rubric = normalized.rubric;
             const review = {
                 reviewId: `review_${Date.now()}`,
                 derivativeId: args.derivativeId,
@@ -839,25 +941,26 @@ export class TemplateHandlers {
                 brief: args.brief || '',
                 issues: args.issues || [],
                 suggestedFixes: args.suggestedFixes || [],
+                rubricCompleteness: normalized.rubricCompleteness,
+                presentCategories: normalized.presentCategories,
+                missingCategories: normalized.missingCategories,
+                schemaWarnings: normalized.schemaWarnings,
                 ...(rubric ? {
                     designQualityRubric: rubric,
-                    overallStatus: rubric.overallStatus ?? args.overallStatus ?? null,
-                    confidence: rubric.confidence ?? args.confidence ?? null,
-                    sourceEvidence: rubric.sourceEvidence ?? args.sourceEvidence ?? null,
-                    categoryRatings: rubric.categories ?? args.categoryRatings ?? null,
-                    highSeverityIssues: rubric.highSeverityIssues ?? args.highSeverityIssues ?? [],
-                    blockers: rubric.blockers ?? args.blockers ?? [],
-                    warnings: rubric.warnings ?? args.warnings ?? [],
-                    recommendedNextBatch: rubric.recommendedNextBatch ?? args.recommendedNextBatch ?? null,
-                    doNotChange: rubric.doNotChange ?? args.doNotChange ?? []
+                    overallStatus: rubric.overallStatus ?? null,
+                    confidence: rubric.confidence ?? null,
+                    sourceEvidence: rubric.sourceEvidence ?? null,
+                    categoryRatings: rubric.categories,
+                    highSeverityIssues: rubric.highSeverityIssues,
+                    blockers: rubric.blockers,
+                    warnings: rubric.warnings,
+                    recommendedNextBatch: rubric.recommendedNextBatch,
+                    doNotChange: rubric.doNotChange
                 } : {}),
                 timestamp: new Date().toISOString()
             };
-            const unresolved = (items) => (Array.isArray(items) ? items : []).filter((item) => item?.resolved !== true && item?.status !== 'resolved');
-            const unresolvedHighSeverityIssues = rubric ? unresolved(rubric.highSeverityIssues) : [];
-            const unresolvedBlockers = rubric ? unresolved(rubric.blockers ?? args.blockers) : [];
             const outstandingIssueCount = rubric
-                ? unresolvedHighSeverityIssues.length + unresolvedBlockers.length
+                ? normalized.blockerCount
                 : review.issues.length;
             fs.appendFileSync(assertWorkspacePath(path.join(m.workspaceRoot, 'logs', 'visual_reviews.jsonl'), { kind: 'logs', manifest: m }).path, `${JSON.stringify(review)}\n`);
             upsertDerivative(m, args.derivativeId, {
@@ -866,7 +969,9 @@ export class TemplateHandlers {
                 ...(rubric ? {
                     latestDesignReviewStatus: review.overallStatus,
                     latestDesignReviewConfidence: review.confidence,
-                    unresolvedDesignBlockerCount: unresolvedBlockers.length
+                    unresolvedDesignBlockerCount: normalized.blockerCount,
+                    latestDesignRubricCompleteness: normalized.rubricCompleteness,
+                    latestDesignMissingCategories: normalized.missingCategories
                 } : {})
             });
             return review;

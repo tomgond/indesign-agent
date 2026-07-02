@@ -84,13 +84,13 @@ const designQualitySourceEvidenceSchema = {
     additionalProperties: true,
     properties: {
         derivativeId: { type: 'string' },
-        previewId: { type: 'string' },
-        indesignPreviewId: { type: 'string' },
-        targetPreviewId: { type: 'string' },
-        inspectionId: { type: 'string' },
-        pageIndex: { type: 'integer', minimum: 0 },
+        previewId: { type: ['string', 'null'] },
+        indesignPreviewId: { type: ['string', 'null'] },
+        targetPreviewId: { type: ['string', 'null'] },
+        inspectionId: { type: ['string', 'null'] },
+        pageIndex: { type: ['integer', 'null'], minimum: 0 },
         toolEvidence: { type: 'array', items: { type: 'string' } },
-        sourceBasePreviewId: { type: 'string' }
+        sourceBasePreviewId: { type: ['string', 'null'] }
     }
 };
 

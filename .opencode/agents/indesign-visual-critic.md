@@ -37,7 +37,7 @@ Review flow:
 3. Build the rubric from exported preview plus structured inspection.
 4. If preview and inspection disagree, rate `productionRisk` warning/fail and recommend `diagnose_visual_mismatch` before content edits.
 5. Generate at most one bounded repair batch.
-6. Call `record_visual_review` with the full structured `designQualityRubric` for every substantive review.
+6. Call `record_visual_review` with all nine categories in the structured `designQualityRubric` for every substantive review with sufficient evidence.
 7. Return the rubric, recording result, and verdict.
 
 Structured rubric contract:
@@ -90,6 +90,8 @@ blocksFinalization: boolean
 Use `3` for strong/pass, `2` for acceptable, `1` for warning, and `0` for fail. Every warning/fail category requires concrete evidence and a scoped repair suggestion. Every high-severity issue must explain whether it affects readability, editability, production safety, or stated user acceptance criteria. Treat `visualQualityOnly` findings as warnings unless they clearly violate the user request or make the design unreadable or unusable.
 
 `recommendedNextBatch` must be null or identify only bounded tool calls for named rubric issue IDs/categories. It is not permission for free-form redesign. Preserve `doNotChange`.
+
+If failed preview export, missing inspection, degraded state, or interruption prevents a complete review, still record the partial evidence with `record_visual_review`. A partial rubric is incomplete evidence, never an implied pass; identify what is missing and route to re-export, inspection, repair, or replan.
 
 Verdict mapping:
 

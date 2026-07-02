@@ -82,6 +82,20 @@ try {
     const visualReviewSchema = templateToolDefinitions.find((tool) => tool.name === 'record_visual_review').inputSchema;
     assert.ok(visualReviewSchema.properties.designQualityRubric);
     assert.ok(visualReviewSchema.properties.designQualityRubric.properties.categories.properties.productionRisk);
+    assert.equal(visualReviewSchema.properties.designQualityRubric.properties.categories.required, undefined);
+    const sourceEvidenceSchema = visualReviewSchema.properties.designQualityRubric.properties.sourceEvidence;
+    for (const field of ['previewId', 'indesignPreviewId', 'targetPreviewId', 'inspectionId', 'pageIndex', 'sourceBasePreviewId']) {
+        assert.equal(sourceEvidenceSchema.properties[field].type.includes('null'), true, `${field} must accept null`);
+    }
+
+    const categoryNames = [
+        'hierarchy', 'alignment', 'spacing', 'typography', 'contrastColor', 'imageUse',
+        'styleConsistency', 'editability', 'productionRisk'
+    ];
+    const passingCategory = (evidence) => ({
+        rating: 'pass', severity: 'none', score: 3, evidence, affectedObjects: [],
+        repairSuggestion: '', suggestedToolCalls: [], acceptanceImpact: 'none', blocksFinalization: false
+    });
 
     const legacyReview = await TemplateHandlers.record_visual_review({
         derivativeId: 'derivative_001',
@@ -91,37 +105,133 @@ try {
     });
     assert.equal(legacyReview.success, true);
     assert.equal(legacyReview.result.issues.length, 2);
+    assert.equal(legacyReview.result.rubricCompleteness, 'none');
     assert.equal(loadWorkspace(workspaceRoot).derivatives.find((item) => item.derivativeId === 'derivative_001').outstandingIssueCount, 2);
 
-    const structuredRubric = {
-        schemaVersion: '1.0',
-        overallStatus: 'needs_repair',
-        confidence: 'high',
-        summary: 'One blocking editability issue and one production blocker.',
-        sourceEvidence: { derivativeId: 'derivative_001', previewId: 'preview_001', inspectionId: 'inspection_001', toolEvidence: ['inspect_derivative'] },
-        categories: {
-            hierarchy: { rating: 'pass', severity: 'none', score: 3, evidence: 'Heading dominates.', affectedObjects: [], repairSuggestion: '', suggestedToolCalls: [], acceptanceImpact: 'none', blocksFinalization: false },
-            editability: { rating: 'fail', severity: 'high', score: 0, evidence: 'Title is not live text.', affectedObjects: [{ labelQuery: { slot: 'title' } }], repairSuggestion: 'Restore a live text slot.', suggestedToolCalls: [{ tool: 'create_text_slot', args: { slot: 'title' } }], acceptanceImpact: 'editability', blocksFinalization: true }
-        },
-        highSeverityIssues: [{ id: 'editability-1', category: 'editability', resolved: false }],
-        blockers: [{ id: 'production-1', category: 'productionRisk', status: 'open' }, { id: 'resolved-1', resolved: true }],
-        warnings: [{ id: 'spacing-1', category: 'spacing' }],
-        recommendedNextBatch: { issueIds: ['editability-1'], toolCalls: [{ tool: 'create_text_slot' }] },
-        doNotChange: ['approved background']
+    const nullableEvidence = {
+        derivativeId: 'derivative_001',
+        previewId: null,
+        indesignPreviewId: null,
+        targetPreviewId: null,
+        inspectionId: null,
+        pageIndex: null,
+        sourceBasePreviewId: null,
+        toolEvidence: []
     };
-    const structuredReview = await TemplateHandlers.record_visual_review({ derivativeId: 'derivative_001', designQualityRubric: structuredRubric });
-    assert.equal(structuredReview.success, true);
-    assert.deepEqual(structuredReview.result.designQualityRubric, structuredRubric);
-    assert.equal(structuredReview.result.overallStatus, 'needs_repair');
+    const partialReview = await TemplateHandlers.record_visual_review({
+        derivativeId: 'derivative_001',
+        designQualityRubric: {
+            sourceEvidence: nullableEvidence,
+            categories: {
+                hierarchy: passingCategory('Heading dominates.'),
+                alignment: passingCategory('Primary edges align.')
+            }
+        }
+    });
+    assert.equal(partialReview.success, true);
+    assert.deepEqual(partialReview.result.sourceEvidence, nullableEvidence);
+    assert.equal(partialReview.result.rubricCompleteness, 'partial');
+    assert.deepEqual(partialReview.result.presentCategories, ['hierarchy', 'alignment']);
+    assert.deepEqual(partialReview.result.missingCategories, categoryNames.slice(2));
+    assert.equal(Object.hasOwn(partialReview.result.designQualityRubric.categories, 'spacing'), false);
+
+    const completeCategories = Object.fromEntries(categoryNames.map((name) => [name, passingCategory(`${name} evidence`)]));
+    const completeRubric = {
+        schemaVersion: '1.0',
+        overallStatus: 'pass',
+        confidence: 'high',
+        summary: 'All rubric categories reviewed.',
+        sourceEvidence: nullableEvidence,
+        categories: completeCategories
+    };
+    const completeReview = await TemplateHandlers.record_visual_review({ derivativeId: 'derivative_001', designQualityRubric: completeRubric });
+    assert.equal(completeReview.success, true);
+    assert.equal(completeReview.result.rubricCompleteness, 'complete');
+    assert.deepEqual(completeReview.result.missingCategories, []);
+    let reviewedDerivative = loadWorkspace(workspaceRoot).derivatives.find((item) => item.derivativeId === 'derivative_001');
+    assert.equal(reviewedDerivative.latestDesignRubricCompleteness, 'complete');
+    assert.deepEqual(reviewedDerivative.latestDesignMissingCategories, []);
+
+    const categoryBlockerReview = await TemplateHandlers.record_visual_review({
+        derivativeId: 'derivative_001',
+        designQualityRubric: {
+            overallStatus: 'blocked',
+            categories: {
+                editability: {
+                    rating: 'fail', severity: 'high', score: 0, evidence: 'Title is not live text.',
+                    affectedObjects: [{ labelQuery: { slot: 'title' } }], repairSuggestion: 'Restore a live text slot.',
+                    suggestedToolCalls: [], acceptanceImpact: 'editability', blocksFinalization: true
+                }
+            }
+        }
+    });
+    assert.equal(categoryBlockerReview.success, true);
+    reviewedDerivative = loadWorkspace(workspaceRoot).derivatives.find((item) => item.derivativeId === 'derivative_001');
+    assert.equal(reviewedDerivative.unresolvedDesignBlockerCount, 1);
+    assert.equal(reviewedDerivative.outstandingIssueCount, 1);
+
+    const subjectiveReview = await TemplateHandlers.record_visual_review({
+        derivativeId: 'derivative_001',
+        designQualityRubric: {
+            categories: {
+                styleConsistency: {
+                    rating: 'fail', severity: 'high', score: 0, evidence: 'Accent treatment is subjective.',
+                    affectedObjects: [], repairSuggestion: 'Consider adjusting the accent.', suggestedToolCalls: [],
+                    acceptanceImpact: 'visualQualityOnly', blocksFinalization: true
+                }
+            }
+        }
+    });
+    assert.equal(subjectiveReview.success, true);
+    reviewedDerivative = loadWorkspace(workspaceRoot).derivatives.find((item) => item.derivativeId === 'derivative_001');
+    assert.equal(reviewedDerivative.unresolvedDesignBlockerCount, 0);
+    assert.equal(reviewedDerivative.outstandingIssueCount, 0);
+
+    const normalizedBlockerReview = await TemplateHandlers.record_visual_review({
+        derivativeId: 'derivative_001',
+        designQualityRubric: {
+            categories: {
+                productionRisk: {
+                    rating: 'fail', severity: 'high', acceptanceImpact: 'productionSafety', blocksFinalization: true
+                }
+            },
+            blockers: [
+                { id: 'production-open', category: 'productionRisk', status: 'open' },
+                { id: 'production-resolved', category: 'productionRisk', status: 'resolved' }
+            ],
+            highSeverityIssues: [
+                { id: 'editability-open', category: 'editability', acceptanceImpact: 'editability', resolved: false },
+                { id: 'subjective-open', category: 'styleConsistency', acceptanceImpact: 'visualQualityOnly', resolved: false }
+            ]
+        }
+    });
+    assert.equal(normalizedBlockerReview.success, true);
+    reviewedDerivative = loadWorkspace(workspaceRoot).derivatives.find((item) => item.derivativeId === 'derivative_001');
+    assert.equal(reviewedDerivative.unresolvedDesignBlockerCount, 2);
+    assert.equal(reviewedDerivative.outstandingIssueCount, 2);
+
+    const aliasCategories = { hierarchy: passingCategory('Alias hierarchy evidence.') };
+    const aliasReview = await TemplateHandlers.record_visual_review({ derivativeId: 'derivative_001', categoryRatings: aliasCategories });
+    assert.equal(aliasReview.success, true);
+    assert.deepEqual(aliasReview.result.designQualityRubric.categories, aliasCategories);
+    assert.deepEqual(aliasReview.result.categoryRatings, aliasCategories);
+
+    const nestedCategories = { spacing: passingCategory('Nested spacing evidence.') };
+    const divergentReview = await TemplateHandlers.record_visual_review({
+        derivativeId: 'derivative_001',
+        designQualityRubric: { categories: nestedCategories },
+        categoryRatings: aliasCategories
+    });
+    assert.equal(divergentReview.success, true);
+    assert.deepEqual(divergentReview.result.designQualityRubric.categories, nestedCategories);
+    assert.deepEqual(divergentReview.result.categoryRatings, nestedCategories);
+    assert.equal(divergentReview.result.schemaWarnings.some((warning) => /differed from categoryRatings/i.test(warning)), true);
+
     const listedReviews = await TemplateHandlers.list_visual_reviews({ derivativeId: 'derivative_001' });
     assert.equal(listedReviews.success, true);
-    assert.equal(listedReviews.result.length, 2);
-    assert.deepEqual(listedReviews.result.at(-1).designQualityRubric, structuredRubric);
-    const reviewedDerivative = loadWorkspace(workspaceRoot).derivatives.find((item) => item.derivativeId === 'derivative_001');
-    assert.equal(reviewedDerivative.outstandingIssueCount, 2);
-    assert.equal(reviewedDerivative.latestDesignReviewStatus, 'needs_repair');
-    assert.equal(reviewedDerivative.latestDesignReviewConfidence, 'high');
-    assert.equal(reviewedDerivative.unresolvedDesignBlockerCount, 1);
+    assert.equal(listedReviews.result.length, 8);
+    assert.equal(listedReviews.result[0].issues.length, 2);
+    assert.equal(listedReviews.result.at(-1).rubricCompleteness, 'partial');
 
     assert.deepEqual(resolvePreviewExportSettings({}), { previewQuality: 'checkpoint', resolution: 48 });
     assert.deepEqual(resolvePreviewExportSettings({ previewQuality: 'review' }), { previewQuality: 'review', resolution: 96 });

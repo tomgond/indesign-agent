@@ -70,13 +70,16 @@ const checksByFile = {
     ],
     codexCritic: [
         [/record_visual_review[\s\S]*designQualityRubric|designQualityRubric[\s\S]*record_visual_review/i, 'structured review recording'],
+        [/all nine categories/i, 'all nine normal-review categories'],
+        [/partial rubric is incomplete evidence[\s\S]*never an implied pass/i, 'partial review semantics'],
         [/rating:[\s\S]*severity:[\s\S]*score:[\s\S]*evidence:/i, 'category rating fields'],
         [/repairSuggestion:[\s\S]*suggestedToolCalls:[\s\S]*acceptanceImpact:[\s\S]*blocksFinalization:/i, 'category repair and impact fields']
     ],
     codexPreflight: [
         [/latest visual review/i, 'latest visual review'],
         [/high-severity design issues block finalization only when[\s\S]*userAcceptanceCriteria[\s\S]*readability[\s\S]*editability[\s\S]*productionSafety/i, 'narrow design blocker rule'],
-        [/visualQualityOnly[\s\S]*does not block/i, 'visual quality warning rule']
+        [/visualQualityOnly[\s\S]*does not block/i, 'visual quality warning rule'],
+        [/partial rubric as incomplete evidence[\s\S]*do not finalize/i, 'partial rubric preflight rule']
     ],
     opencodeTemplateAgent: [
         [/exported previews? .*document truth/i, 'exported preview truth'],
@@ -122,13 +125,16 @@ const checksByFile = {
     ],
     opencodeCritic: [
         [/record_visual_review[\s\S]*designQualityRubric|designQualityRubric[\s\S]*record_visual_review/i, 'structured review recording'],
+        [/all nine categories/i, 'all nine normal-review categories'],
+        [/partial rubric is incomplete evidence[\s\S]*never an implied pass/i, 'partial review semantics'],
         [/rating:[\s\S]*severity:[\s\S]*score:[\s\S]*evidence:/i, 'category rating fields'],
         [/repairSuggestion:[\s\S]*suggestedToolCalls:[\s\S]*acceptanceImpact:[\s\S]*blocksFinalization:/i, 'category repair and impact fields']
     ],
     opencodePreflight: [
         [/latest visual review/i, 'latest visual review'],
         [/high-severity design issues block finalization only when[\s\S]*userAcceptanceCriteria[\s\S]*readability[\s\S]*editability[\s\S]*productionSafety/i, 'narrow design blocker rule'],
-        [/visualQualityOnly[\s\S]*do not block/i, 'visual quality warning rule']
+        [/visualQualityOnly[\s\S]*do not block/i, 'visual quality warning rule'],
+        [/partial rubric as incomplete evidence[\s\S]*do not finalize/i, 'partial rubric preflight rule']
     ]
 };
 

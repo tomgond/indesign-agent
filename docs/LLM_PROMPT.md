@@ -132,7 +132,7 @@ For derivative generation and layout validation, **use exported previews plus st
 
 ### Structured Design-Quality Review
 
-Substantive visual review must record a structured rubric through `record_visual_review`. Review `hierarchy`, `alignment`, `spacing`, `typography`, `contrastColor`, `imageUse`, `styleConsistency`, `editability`, and `productionRisk`; each category records `rating`, `severity`, `score`, evidence, scoped repair guidance, acceptance impact, and whether it blocks finalization. Repairs must be concrete and bounded. Preflight blocks high-severity rubric issues only when they affect stated acceptance criteria, readability, editability, or production safety; subjective visual-quality warnings are not a general taste gate. Critique still uses exported previews plus structured inspection, never screenshots as layout truth.
+Substantive visual review should record all nine structured rubric categories through `record_visual_review`: `hierarchy`, `alignment`, `spacing`, `typography`, `contrastColor`, `imageUse`, `styleConsistency`, `editability`, and `productionRisk`. Each category records `rating`, `severity`, `score`, evidence, scoped repair guidance, acceptance impact, and whether it blocks finalization. The recorder tolerates partial evidence after degraded or interrupted review, but marks it incomplete rather than passing. Repairs must be concrete and bounded. Preflight blocks high-severity rubric issues only when they affect stated acceptance criteria, readability, editability, or production safety; subjective visual-quality warnings are not a general taste gate. Critique still uses exported previews plus structured inspection, never screenshots as layout truth.
 
 ### Image Placement with Scaling
 
